@@ -15,7 +15,7 @@ import './App.css';
 
 // --- CONFIGURATION ---
 // CHANGE THIS WHEN DEPLOYING: "http://localhost:8000" -> "https://your-railway-url.app"
-const API_BASE_URL = "http://localhost:8000"; 
+const API_BASE_URL = process.env.REACT_APP_API_URL || "http://localhost:8000";
 
 // --- SUB-COMPONENT: TYPEWRITER EFFECT ---
 const Typewriter = ({ text, onTick, isAgent }) => {

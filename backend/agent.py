@@ -9,20 +9,21 @@ from langgraph.prebuilt import create_react_agent
 from langgraph.checkpoint.memory import MemorySaver
 from tavily import TavilyClient
 import motor.motor_asyncio
-from coinbase_agentkit import AgentKit, AgentKitConfig, CdpWalletProvider, CdpWalletProviderConfig
 
+# --- ROBUST COINBASE IMPORT BLOCK ---
+# This block attempts to load the library regardless of version differences
 try:
-    # 1. Try Top-Level Import (Newest Version)
+    # 1. Try Top-Level Import (Newest Version 0.1.2+)
     from coinbase_agentkit import AgentKit, AgentKitConfig, CdpWalletProvider, CdpWalletProviderConfig
     print("✅ Loaded Coinbase AgentKit from Top-Level")
 except ImportError:
     try:
-        # 2. Try Submodule Import (Fallback)
+        # 2. Try Submodule Import (Fallback for older versions)
         from coinbase_agentkit import AgentKit, AgentKitConfig
         from coinbase_agentkit.wallet_providers import CdpWalletProvider, CdpWalletProviderConfig
         print("⚠️ Loaded Coinbase AgentKit from Submodule (wallet_providers)")
     except ImportError as e:
-        # 3. DEBUG MODE: What version is actually installed?
+        # 3. CRITICAL FAILURE: Debug info
         import coinbase_agentkit
         print(f"❌ CRITICAL IMPORT ERROR. Installed Version: {getattr(coinbase_agentkit, '__version__', 'Unknown')}")
         print(f"❌ Error Detail: {e}")
@@ -129,7 +130,6 @@ def get_strategy_rules(sentiment: str):
 @tool
 def get_crypto_price(asset: str):
     """Checks current price."""
-    # (Keep your existing implementation here)
     mapping = {'eth': 'ethereum', 'btc': 'bitcoin', 'sol': 'solana', 'link': 'chainlink', 'pepe': 'pepe', 'uni': 'uniswap'}
     token_id = mapping.get(asset.lower(), asset.lower())
     url = f"https://api.coingecko.com/api/v3/simple/price?ids={token_id}&vs_currencies=usd"
@@ -251,16 +251,46 @@ def initialize_agent(wallet_data_json: str = None):
     # Return the executor and the agent_kit (which contains the wallet provider)
     return agent_executor, agent_kit
 
-# --- WALLET EXPORT HELPER (UPDATED) ---
+# --- WALLET EXPORT HELPER (UNIVERSAL) ---
 def get_agent_address(agent_kit):
     try:
-        # Export now returns a 'WalletData' object, not a string
         data = agent_kit.wallet_provider.export_wallet()
         
-        # We must convert it to a dictionary first
-        wallet_dict = data.to_dict()
+        # DEBUG: Print the raw type so we know what we are dealing with
+        print(f"DEBUG: Exported Wallet Type: {type(data)}")
+
+        # Case 1: It's a WalletData object (Newer versions)
+        if hasattr(data, "to_dict"):
+            wallet_dict = data.to_dict()
+            print("DEBUG: Converted WalletData to dict")
+            
+        # Case 2: It's already a dict (Rare but possible)
+        elif isinstance(data, dict):
+            wallet_dict = data
+            print("DEBUG: Data was already a dict")
+            
+        # Case 3: It's a JSON string (Older versions)
+        elif isinstance(data, str):
+            wallet_dict = json.loads(data)
+            print("DEBUG: Parsed JSON string")
+            
+        else:
+            print("DEBUG: Unknown data type, trying force cast")
+            wallet_dict = dict(data)
+
+        # Check for the address
+        address = wallet_dict.get("default_address_id")
         
-        return wallet_dict.get("default_address_id", "Unknown")
+        if not address:
+            # Fallback: Sometimes it is stored under 'addresses' list
+            if "addresses" in wallet_dict and len(wallet_dict["addresses"]) > 0:
+                address = wallet_dict["addresses"][0].get("id")
+        
+        if not address:
+            print(f"❌ CRITICAL: keys found: {wallet_dict.keys()}")
+            return "Unknown"
+
+        return address
         
     except Exception as e:
         print(f"!! WALLET EXPORT ERROR: {e}")

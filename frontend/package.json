@@ -1,7 +1,6 @@
 {
   "name": "ai-studio-frontend",
   "version": "0.1.0",
-  "proxy": "http://localhost:8000",
   "private": true,
   "dependencies": {
     "@base-org/account": "^2.5.0",
@@ -32,7 +31,7 @@
     "web-vitals": "^2.1.4"
   },
   "scripts": {
-    "start": "react-scripts start",
+    "start": "HOST=localhost react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject"

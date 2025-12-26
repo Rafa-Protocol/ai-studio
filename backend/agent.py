@@ -251,47 +251,43 @@ def initialize_agent(wallet_data_json: str = None):
     # Return the executor and the agent_kit (which contains the wallet provider)
     return agent_executor, agent_kit
 
-# --- WALLET EXPORT HELPER (UNIVERSAL) ---
+# --- WALLET EXPORT HELPER (UNIVERSAL V2) ---
 def get_agent_address(agent_kit):
     try:
+        # METHOD 1: Ask the Live Wallet (Best for CDP SDK v0.10+)
+        # The provider holds the actual 'Wallet' object in memory
+        if hasattr(agent_kit.wallet_provider, "wallet"):
+            wallet = agent_kit.wallet_provider.wallet
+            # The CDP Wallet object has a 'default_address' property
+            if hasattr(wallet, "default_address"):
+                return wallet.default_address.address_id
+
+        # METHOD 2: Check for direct address property
+        if hasattr(agent_kit.wallet_provider, "address"):
+            return agent_kit.wallet_provider.address
+
+        # METHOD 3: Fallback to Export (Old Way - kept for safety)
         data = agent_kit.wallet_provider.export_wallet()
         
-        # DEBUG: Print the raw type so we know what we are dealing with
-        print(f"DEBUG: Exported Wallet Type: {type(data)}")
-
-        # Case 1: It's a WalletData object (Newer versions)
+        # Convert to dict if needed
         if hasattr(data, "to_dict"):
             wallet_dict = data.to_dict()
-            print("DEBUG: Converted WalletData to dict")
-            
-        # Case 2: It's already a dict (Rare but possible)
         elif isinstance(data, dict):
             wallet_dict = data
-            print("DEBUG: Data was already a dict")
-            
-        # Case 3: It's a JSON string (Older versions)
-        elif isinstance(data, str):
-            wallet_dict = json.loads(data)
-            print("DEBUG: Parsed JSON string")
-            
         else:
-            print("DEBUG: Unknown data type, trying force cast")
             wallet_dict = dict(data)
 
-        # Check for the address
+        # Try to find address in export
         address = wallet_dict.get("default_address_id")
-        
-        if not address:
-            # Fallback: Sometimes it is stored under 'addresses' list
-            if "addresses" in wallet_dict and len(wallet_dict["addresses"]) > 0:
-                address = wallet_dict["addresses"][0].get("id")
-        
-        if not address:
-            print(f"❌ CRITICAL: keys found: {wallet_dict.keys()}")
-            return "Unknown"
+        if not address and "addresses" in wallet_dict:
+             address = wallet_dict["addresses"][0].get("id")
 
-        return address
+        if address:
+            return address
+
+        print(f"❌ CRITICAL: Could not find address. Keys: {wallet_dict.keys()}")
+        return "Unknown"
         
     except Exception as e:
-        print(f"!! WALLET EXPORT ERROR: {e}")
+        print(f"!! WALLET ADDRESS ERROR: {e}")
         return "0xError"

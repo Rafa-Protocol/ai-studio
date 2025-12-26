@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import requests
 import asyncio
 from dotenv import load_dotenv
@@ -9,25 +10,24 @@ from langgraph.prebuilt import create_react_agent
 from langgraph.checkpoint.memory import MemorySaver
 from tavily import TavilyClient
 import motor.motor_asyncio
+import coinbase_agentkit
 
-# --- ROBUST COINBASE IMPORT BLOCK ---
-# This block attempts to load the library regardless of version differences
+# --- COMPATIBILITY LAYER (Fixes v0.7.4+ Crash) ---
 try:
-    # 1. Try Top-Level Import (Newest Version 0.1.2+)
-    from coinbase_agentkit import AgentKit, AgentKitConfig, CdpWalletProvider, CdpWalletProviderConfig
-    print("✅ Loaded Coinbase AgentKit from Top-Level")
+    # 1. Try importing the NEW class name (v0.7+)
+    from coinbase_agentkit import AgentKit, AgentKitConfig
+    from coinbase_agentkit import CdpEvmWalletProvider as CdpWalletProvider
+    from coinbase_agentkit import CdpEvmWalletProviderConfig as CdpWalletProviderConfig
+    print("✅ Loaded CdpEvmWalletProvider (New API)")
 except ImportError:
     try:
-        # 2. Try Submodule Import (Fallback for older versions)
+        # 2. Fallback to OLD class name (v0.1.x)
+        from coinbase_agentkit import AgentKit, AgentKitConfig, CdpWalletProvider, CdpWalletProviderConfig
+        print("⚠️ Loaded CdpWalletProvider (Old API)")
+    except ImportError:
+        # 3. Emergency Fallback for Submodules
         from coinbase_agentkit import AgentKit, AgentKitConfig
         from coinbase_agentkit.wallet_providers import CdpWalletProvider, CdpWalletProviderConfig
-        print("⚠️ Loaded Coinbase AgentKit from Submodule (wallet_providers)")
-    except ImportError as e:
-        # 3. CRITICAL FAILURE: Debug info
-        import coinbase_agentkit
-        print(f"❌ CRITICAL IMPORT ERROR. Installed Version: {getattr(coinbase_agentkit, '__version__', 'Unknown')}")
-        print(f"❌ Error Detail: {e}")
-        raise e
 
 from coinbase_agentkit_langchain import get_langchain_tools
 
@@ -168,7 +168,7 @@ def initialize_agent(wallet_data_json: str = None):
 
     memory = MemorySaver()
 
-    # THE QUANT SYSTEM PROMPT
+    # THE QUANT SYSTEM PROMPT (UNCHANGED)
     system_message = """
     You are RAFA, an elite Quant Fund Manager with a bias for humor and cyberpunk aesthetics.
 
@@ -251,43 +251,37 @@ def initialize_agent(wallet_data_json: str = None):
     # Return the executor and the agent_kit (which contains the wallet provider)
     return agent_executor, agent_kit
 
-# --- WALLET EXPORT HELPER (UNIVERSAL V2) ---
+# --- WALLET EXPORT HELPER (UNIVERSAL) ---
 def get_agent_address(agent_kit):
     try:
-        print("DEBUG: Attempting to find wallet address...")
-        
         # STRATEGY 1: Inspect the Provider directly
         provider = agent_kit.wallet_provider
-        # Check public 'wallet' attribute
+        
+        # Method A: Check public 'wallet' attribute
         wallet = getattr(provider, "wallet", None)
-        # Check private '_wallet' attribute (Common in Python SDKs)
         if not wallet:
+            # Method B: Check private '_wallet' attribute
             wallet = getattr(provider, "_wallet", None)
             
         if wallet:
-            print(f"DEBUG: Found Wallet Object: {type(wallet)}")
             if hasattr(wallet, "default_address"):
                 return wallet.default_address.address_id
             if hasattr(wallet, "addresses") and len(wallet.addresses) > 0:
                 return wallet.addresses[0].id
                 
-        # STRATEGY 2: The "Tool Hack" (Most Robust)
-        # We invoke the 'get_wallet_details' tool which MUST know the address
-        print("DEBUG: Wallet object missing/opaque. Trying Tool Hack...")
+        # STRATEGY 2: The "Tool Hack"
+        # Since we can't reliably predict the internal structure of the new SDK,
+        # we ask the agent's own tools to tell us the address.
         tools = get_langchain_tools(agent_kit)
         for t in tools:
             if "get_wallet_details" in t.name:
-                # Run the tool manually
                 result = t.invoke({})
-                print(f"DEBUG: Tool Result: {str(result)[:50]}...") 
-                
-                # Extract 0x... address using Regex
+                # Use regex to find the address in the tool's output string
                 match = re.search(r"0x[a-fA-F0-9]{40}", str(result))
                 if match:
-                    print(f"DEBUG: Found address via tool: {match.group(0)}")
                     return match.group(0)
 
-        # STRATEGY 3: Last Resort (Export)
+        # STRATEGY 3: Export (Last Resort - often missing in new SDKs)
         data = provider.export_wallet()
         if hasattr(data, "to_dict"):
             data = data.to_dict()
@@ -299,8 +293,6 @@ def get_agent_address(agent_kit):
         addr = data.get("default_address_id")
         if addr: return addr
 
-        print(f"❌ CRITICAL: All methods failed. Available Export Keys: {data.keys()}")
-        print(f"DEBUG: Provider Dir: {dir(provider)}")
         return "Unknown"
         
     except Exception as e:

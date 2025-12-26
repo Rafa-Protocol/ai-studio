@@ -10,6 +10,24 @@ from langgraph.checkpoint.memory import MemorySaver
 from tavily import TavilyClient
 import motor.motor_asyncio
 from coinbase_agentkit import AgentKit, AgentKitConfig, CdpWalletProvider, CdpWalletProviderConfig
+
+try:
+    # 1. Try Top-Level Import (Newest Version)
+    from coinbase_agentkit import AgentKit, AgentKitConfig, CdpWalletProvider, CdpWalletProviderConfig
+    print("✅ Loaded Coinbase AgentKit from Top-Level")
+except ImportError:
+    try:
+        # 2. Try Submodule Import (Fallback)
+        from coinbase_agentkit import AgentKit, AgentKitConfig
+        from coinbase_agentkit.wallet_providers import CdpWalletProvider, CdpWalletProviderConfig
+        print("⚠️ Loaded Coinbase AgentKit from Submodule (wallet_providers)")
+    except ImportError as e:
+        # 3. DEBUG MODE: What version is actually installed?
+        import coinbase_agentkit
+        print(f"❌ CRITICAL IMPORT ERROR. Installed Version: {getattr(coinbase_agentkit, '__version__', 'Unknown')}")
+        print(f"❌ Error Detail: {e}")
+        raise e
+
 from coinbase_agentkit_langchain import get_langchain_tools
 
 # Import your new Engines

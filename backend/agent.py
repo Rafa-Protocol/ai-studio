@@ -254,38 +254,53 @@ def initialize_agent(wallet_data_json: str = None):
 # --- WALLET EXPORT HELPER (UNIVERSAL V2) ---
 def get_agent_address(agent_kit):
     try:
-        # METHOD 1: Ask the Live Wallet (Best for CDP SDK v0.10+)
-        # The provider holds the actual 'Wallet' object in memory
-        if hasattr(agent_kit.wallet_provider, "wallet"):
-            wallet = agent_kit.wallet_provider.wallet
-            # The CDP Wallet object has a 'default_address' property
+        print("DEBUG: Attempting to find wallet address...")
+        
+        # STRATEGY 1: Inspect the Provider directly
+        provider = agent_kit.wallet_provider
+        # Check public 'wallet' attribute
+        wallet = getattr(provider, "wallet", None)
+        # Check private '_wallet' attribute (Common in Python SDKs)
+        if not wallet:
+            wallet = getattr(provider, "_wallet", None)
+            
+        if wallet:
+            print(f"DEBUG: Found Wallet Object: {type(wallet)}")
             if hasattr(wallet, "default_address"):
                 return wallet.default_address.address_id
+            if hasattr(wallet, "addresses") and len(wallet.addresses) > 0:
+                return wallet.addresses[0].id
+                
+        # STRATEGY 2: The "Tool Hack" (Most Robust)
+        # We invoke the 'get_wallet_details' tool which MUST know the address
+        print("DEBUG: Wallet object missing/opaque. Trying Tool Hack...")
+        tools = get_langchain_tools(agent_kit)
+        for t in tools:
+            if "get_wallet_details" in t.name:
+                # Run the tool manually
+                result = t.invoke({})
+                print(f"DEBUG: Tool Result: {str(result)[:50]}...") 
+                
+                # Extract 0x... address using Regex
+                match = re.search(r"0x[a-fA-F0-9]{40}", str(result))
+                if match:
+                    print(f"DEBUG: Found address via tool: {match.group(0)}")
+                    return match.group(0)
 
-        # METHOD 2: Check for direct address property
-        if hasattr(agent_kit.wallet_provider, "address"):
-            return agent_kit.wallet_provider.address
-
-        # METHOD 3: Fallback to Export (Old Way - kept for safety)
-        data = agent_kit.wallet_provider.export_wallet()
-        
-        # Convert to dict if needed
+        # STRATEGY 3: Last Resort (Export)
+        data = provider.export_wallet()
         if hasattr(data, "to_dict"):
-            wallet_dict = data.to_dict()
-        elif isinstance(data, dict):
-            wallet_dict = data
+            data = data.to_dict()
+        elif isinstance(data, str):
+            data = json.loads(data)
         else:
-            wallet_dict = dict(data)
+            data = dict(data)
+            
+        addr = data.get("default_address_id")
+        if addr: return addr
 
-        # Try to find address in export
-        address = wallet_dict.get("default_address_id")
-        if not address and "addresses" in wallet_dict:
-             address = wallet_dict["addresses"][0].get("id")
-
-        if address:
-            return address
-
-        print(f"❌ CRITICAL: Could not find address. Keys: {wallet_dict.keys()}")
+        print(f"❌ CRITICAL: All methods failed. Available Export Keys: {data.keys()}")
+        print(f"DEBUG: Provider Dir: {dir(provider)}")
         return "Unknown"
         
     except Exception as e:

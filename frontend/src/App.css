@@ -1,0 +1,68 @@
+/* src/App.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom Scrollbar for the Cyberpunk look */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Subtle fade-in animation for new messages */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out forwards;
+}
+
+/* Base Body Style */
+body {
+  background-color: #030014;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace; /* Ensure you have a mono font imported or installed */
+}
+
+/* Input Auto-fill fix for dark mode */
+input:-webkit-autofill,
+input:-webkit-autofill:hover, 
+input:-webkit-autofill:focus, 
+input:-webkit-autofill:active{
+    -webkit-box-shadow: 0 0 0 30px #050210 inset !important;
+    -webkit-text-fill-color: #CFFAFE !important;
+}
+
+/* Neon Text Shadow for Bold items */
+.text-shadow-neon {
+  text-shadow: 0 0 10px rgba(34, 211, 238, 0.4);
+}
+
+/* Ensure Markdown lists line up correctly */
+.markdown-content ul, .markdown-content ol {
+    margin-left: 0.5rem;
+}
+
+/* Tables (if your agent returns data tables) */
+.markdown-content table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    font-size: 0.85rem;
+}
+.markdown-content th {
+    text-align: left;
+    border-bottom: 1px solid rgba(34, 211, 238, 0.3);
+    color: #22d3ee; /* Cyan */
+    padding: 0.5rem;
+    text-transform: uppercase;
+}
+.markdown-content td {
+    padding: 0.5rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    color: #94a3b8;
+}

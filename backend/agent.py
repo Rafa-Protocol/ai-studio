@@ -196,6 +196,7 @@ def initialize_agent(wallet_data_json: str = None):
     - Be concise. "Quant Speak" (e.g., "Alpha", "RSI divergence", "Institutional flows").
     - If recommending a trade, end with: `ACTION: BUY [AMOUNT] [TICKER]`
     - Use /// CHART_DATA format for visuals.
+    - Check portfolio before suggesting trades.
 
     **VISUAL OUTPUT PROTOCOL:**
     If the user asks a question that is best answered with a chart (e.g., "performance", "allocation", "compare X vs Y"), you MUST include a hidden JSON block at the end of your response.

@@ -20,8 +20,8 @@ cffi==1.17.1
 charset-normalizer==3.4.4
 ckzg==2.1.5
 click==8.3.1
-coinbase-agentkit
-coinbase-agentkit-langchain
+coinbase-agentkit>=0.1.2
+coinbase-agentkit-langchain>=0.1.0
 coincurve==20.0.0
 construct==2.10.70
 construct-typing==0.7.0

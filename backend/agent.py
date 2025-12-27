@@ -140,28 +140,39 @@ def get_crypto_price(asset: str):
         return "Price Unavailable"
 
 # --- AGENT FACTORY (UPDATED FOR KEY FIX) ---
-
 def initialize_agent(wallet_data_json: str = None):
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
     
-    # 1. READ THE VARIABLES YOU CONFIRMED YOU HAVE
-    api_key_name = os.getenv("CDP_API_KEY_NAME")
-    api_key_private_key = os.getenv("CDP_API_KEY_PRIVATE_KEY")
+    # --- 1. Load Variables ---
+    # We look for the names you confirmed you have set in Railway
+    api_key_name = os.getenv("CDP_API_KEY_NAME") or os.getenv("CDP_API_KEY_ID")
+    raw_private_key = os.getenv("CDP_API_KEY_PRIVATE_KEY") or os.getenv("CDP_API_KEY_SECRET")
 
-    # Fallback: Check the "ID/SECRET" names just in case (the new SDK defaults)
-    if not api_key_name:
-        api_key_name = os.getenv("CDP_API_KEY_ID")
-    if not api_key_private_key:
-        api_key_private_key = os.getenv("CDP_API_KEY_SECRET")
+    # --- 2. THE FIX: Aggressive Key Normalization ---
+    api_key_private_key = None
+    if raw_private_key:
+        # A. Remove external quotes (common copy-paste error)
+        clean_key = raw_private_key.strip().strip('"').strip("'")
+        
+        # B. Fix literal "backslash n" characters (Railway specific bug)
+        clean_key = clean_key.replace("\\n", "\n")
+        
+        # C. Fix "mashed" keys where newlines became spaces
+        # (If the key has headers but no real newlines, we force them)
+        if "-----BEGIN EC PRIVATE KEY-----" in clean_key and "\n" not in clean_key:
+            clean_key = clean_key.replace("-----BEGIN EC PRIVATE KEY-----", "-----BEGIN EC PRIVATE KEY-----\n")
+            clean_key = clean_key.replace("-----END EC PRIVATE KEY-----", "\n-----END EC PRIVATE KEY-----")
+        
+        api_key_private_key = clean_key
 
-    # 2. THE RAILWAY FIX 
-    if api_key_private_key:
-        api_key_private_key = api_key_private_key.replace("\\n", "\n")
-        # Remove any accidental surrounding quotes
-        api_key_private_key = api_key_private_key.strip().strip('"').strip("'")
+        # D. DEBUG PRINT (Check your Railway Deploy Logs for this line!)
+        print(f"🔑 DEBUG: Key Loaded. First 30 chars: {repr(api_key_private_key[:30])}")
+    
+    else:
+        print("❌ CRITICAL: No Private Key Variable Found!")
 
-    # 3. Configure the Wallet Provider
-    # We explicitly pass the keys so the SDK doesn't panic looking for a file
+    # --- 3. Configure Provider ---
+    # We explicitly pass the clean key so the SDK doesn't use the raw env var
     wallet_config = CdpWalletProviderConfig(
         api_key_name=api_key_name,
         api_key_private_key=api_key_private_key,
@@ -172,7 +183,7 @@ def initialize_agent(wallet_data_json: str = None):
     wallet_provider = CdpWalletProvider(wallet_config)
     agent_kit = AgentKit(AgentKitConfig(wallet_provider=wallet_provider))
 
-    # 5. Get Tools & Setup Agent (Same as before)
+    # 5. Get Tools & Setup Agent
     agentkit_tools = get_langchain_tools(agent_kit)
     
     tools = agentkit_tools + [
@@ -185,10 +196,9 @@ def initialize_agent(wallet_data_json: str = None):
 
     memory = MemorySaver()
 
-    # THE QUANT SYSTEM PROMPT (UNCHANGED)
     system_message = """
     You are RAFA, an elite Quant Fund Manager with a bias for humor and cyberpunk aesthetics.
-
+    
     **YOUR CORE OPERATING LOOP:**
     1. **MACRO FIRST:** Before any advice, run `check_market_conditions`.
        - If ETF Flows are NEGATIVE, be bearish/conservative.

@@ -13,7 +13,6 @@ from langgraph.checkpoint.memory import MemorySaver
 from tavily import TavilyClient
 import motor.motor_asyncio
 import coinbase_agentkit
-from cdp import Cdp 
 
 try:
     # 1. Try importing the NEW class name (v0.7+)
@@ -179,8 +178,6 @@ def initialize_agent(wallet_data_json: str = None):
 
     # --- 2. INITIALIZE AGENTKIT ---
     try:
-        # We pass the cleaned keys directly to the config.
-        # We trust AgentKit to handle the auth validation now that the key format is fixed.
         wallet_config = CdpWalletProviderConfig(
             api_key_name=api_key_name,
             api_key_private_key=final_private_key,

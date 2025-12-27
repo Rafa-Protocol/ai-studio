@@ -148,39 +148,38 @@ def initialize_agent(wallet_data_json: str = None):
     api_key_name = os.getenv("CDP_API_KEY_NAME") or os.getenv("CDP_API_KEY_ID")
     raw_private_key = os.getenv("CDP_API_KEY_PRIVATE_KEY") or os.getenv("CDP_API_KEY_SECRET")
 
-    # --- 2. THE CLEANER ---
+    # --- 2. THE UNIVERSAL FIX ---
     api_key_private_key = None
     if raw_private_key:
         try:
-            # Clean the input (remove whitespace/quotes from the variable itself)
-            clean_raw = raw_private_key.strip().strip('"').strip("'")
+            # Step A: Clean the raw input (remove quotes/spaces)
+            candidate_key = raw_private_key.strip().strip('"').strip("'")
             
-            # Detect Base64 (Standard PEM always starts with "-", Base64 does not)
-            if not clean_raw.startswith("-"):
-                print("🔑 DEBUG: Detected Base64. Decoding...")
-                decoded_bytes = base64.b64decode(clean_raw)
-                decoded_str = decoded_bytes.decode('utf-8')
-                
-                # --- CRITICAL: Sanitize the DECODED string ---
-                # 1. Remove surrounding quotes (in case they were encoded)
-                decoded_str = decoded_str.strip().strip('"').strip("'")
-                # 2. Convert literal \n to real newlines
-                decoded_str = decoded_str.replace("\\n", "\n")
-                # 3. Remove Windows carriage returns
-                decoded_str = decoded_str.replace("\r", "")
-                
-                api_key_private_key = decoded_str
-            else:
-                # Fallback for Raw Text Keys
-                print("🔑 DEBUG: Detected Raw Text Key.")
-                # Force real newlines and strip garbage
-                api_key_private_key = clean_raw.replace("\\n", "\n").replace("\r", "")
-                
-            # Final check: Ensure it looks like a valid PEM key
-            if api_key_private_key and "-----BEGIN" in api_key_private_key:
-                print(f"✅ Key Format looks valid. Starts with: {api_key_private_key[:15]}")
-            else:
-                print(f"⚠️ WARNING: Key might be malformed. Starts with: {api_key_private_key[:15]}")
+            # Step B: Check if it is Base64 (doesn't start with dashes) and Decode it
+            if "-----BEGIN" not in candidate_key:
+                print("🔑 DEBUG: Detected Base64 input. Decoding...")
+                try:
+                    decoded_bytes = base64.b64decode(candidate_key)
+                    decoded_str = decoded_bytes.decode('utf-8')
+                    # If the result looks like a key, use it. Otherwise, assume raw was correct.
+                    if "-----BEGIN" in decoded_str:
+                        candidate_key = decoded_str
+                        print("🔑 DEBUG: Base64 decode successful.")
+                except Exception as e:
+                    print(f"⚠️ WARNING: Base64 decode failed ({e}), using raw string.")
+
+            # Step C: THE RECONSTRUCTION (This fixes the "ValueError")
+            # We strip EVERYTHING (headers, newlines, spaces, quotes) to get just the raw code.
+            payload = candidate_key.replace("-----BEGIN EC PRIVATE KEY-----", "")
+            payload = payload.replace("-----END EC PRIVATE KEY-----", "")
+            payload = payload.replace("\\n", "").replace("\n", "").replace(" ", "").replace("\r", "")
+            payload = payload.strip().strip('"').strip("'")
+
+            # Step D: Rebuild into strict 64-char lines (Required by OpenSSL)
+            chunked_body = "\n".join(payload[i:i+64] for i in range(0, len(payload), 64))
+            api_key_private_key = f"-----BEGIN EC PRIVATE KEY-----\n{chunked_body}\n-----END EC PRIVATE KEY-----\n"
+            
+            print("🔑 DEBUG: Key successfully reconstructed with strict formatting.")
 
         except Exception as e:
             print(f"❌ CRITICAL: Key processing failed: {e}")

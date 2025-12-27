@@ -3,6 +3,7 @@ import json
 import re
 import requests
 import asyncio
+import base64
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
@@ -143,40 +144,36 @@ def get_crypto_price(asset: str):
 def initialize_agent(wallet_data_json: str = None):
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
     
-    # 1. Load Raw Variables
+    # 1. Load Variables
     api_key_name = os.getenv("CDP_API_KEY_NAME") or os.getenv("CDP_API_KEY_ID")
     raw_private_key = os.getenv("CDP_API_KEY_PRIVATE_KEY") or os.getenv("CDP_API_KEY_SECRET")
 
-    # --- 2. THE STRICT FIX: PEM Reconstruction ---
+    # --- 2. THE BASE64 FIX ---
     api_key_private_key = None
     if raw_private_key:
         try:
-            # Step A: Strip wrapping quotes & whitespace
-            clean_key = raw_private_key.strip().strip('"').strip("'")
-            
-            # Step B: Isolate the Base64 Body (Remove Headers/Footers)
-            payload = clean_key.replace("-----BEGIN EC PRIVATE KEY-----", "")
-            payload = payload.replace("-----END EC PRIVATE KEY-----", "")
-            
-            # Step C: Remove ALL "garbage" (literals \n, real newlines, spaces)
-            # This leaves us with a pure, continuous Base64 string
-            payload = payload.replace("\\n", "").replace("\n", "").replace(" ", "")
-            
-            # Step D: Chunk into 64-character lines (Standard PEM Format)
-            # This is the step that fixes the "Invalid Key" error!
-            chunked_body = "\n".join(payload[i:i+64] for i in range(0, len(payload), 64))
-            
-            # Step E: Reassemble with correct headers
-            api_key_private_key = f"-----BEGIN EC PRIVATE KEY-----\n{chunked_body}\n-----END EC PRIVATE KEY-----\n"
-            
-            print("🔑 DEBUG: Key Reconstructed with 64-char lines.")
-            
+            # Check if the key is the "Safe Base64" version (doesn't start with dashes)
+            if "-----BEGIN" not in raw_private_key:
+                print("🔑 DEBUG: Detected Base64 Encoded Key. Decoding...")
+                decoded_bytes = base64.b64decode(raw_private_key)
+                api_key_private_key = decoded_bytes.decode('utf-8')
+                # Ensure literal "\n" characters from the JSON are converted to real newlines
+                api_key_private_key = api_key_private_key.replace("\\n", "\n")
+            else:
+                # Fallback for standard keys (aggressive cleaning)
+                print("🔑 DEBUG: Detected Standard Key. Normalizing...")
+                clean_key = raw_private_key.strip().strip('"').strip("'").replace("\\n", "\n")
+                if "-----BEGIN EC PRIVATE KEY-----" in clean_key and "\n" not in clean_key:
+                     # Reconstruct if lines are mashed
+                     payload = clean_key.replace("-----BEGIN EC PRIVATE KEY-----", "").replace("-----END EC PRIVATE KEY-----", "").replace(" ", "")
+                     chunked_body = "\n".join(payload[i:i+64] for i in range(0, len(payload), 64))
+                     api_key_private_key = f"-----BEGIN EC PRIVATE KEY-----\n{chunked_body}\n-----END EC PRIVATE KEY-----\n"
+                else:
+                    api_key_private_key = clean_key
+
         except Exception as e:
-            print(f"❌ CRITICAL: Key reconstruction failed: {e}")
-
-    else:
-        print("❌ CRITICAL: No Private Key Variable Found!")
-
+            print(f"❌ CRITICAL: Key decoding failed: {e}")
+            
     # 3. Configure Provider
     wallet_config = CdpWalletProviderConfig(
         api_key_name=api_key_name,

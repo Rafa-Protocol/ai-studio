@@ -154,30 +154,32 @@ def initialize_agent(wallet_data_json: str = None):
             decoded_bytes = base64.b64decode(encoded_json)
             data = json.loads(decoded_bytes)
             
-            # Use the exact keys found in your logs: 'id' and 'privateKey'
+            # Get ID and Raw Key
             key_id = data.get("name") or data.get("id")
             raw_key = data.get("privateKey")
             
-            print(f"ℹ️ ID Found: {key_id}", flush=True)
-            
-            # --- 2. TRUST THE JSON (The Change) ---
-            # We do NOT reformat, strip, or chunk the key. 
-            # We assume the JSON contains the correct format (because it works locally).
             if raw_key:
-                # One safety check: ensure literal "\n" strings are real newlines
-                # (Common issue if the JSON was double-escaped)
-                if "\\n" in raw_key:
-                    raw_key = raw_key.replace("\\n", "\n")
+                # --- THE FIX: ONE-LINE FORMATTING ---
+                # 1. Clean the key of existing formatting
+                clean_key = raw_key.replace("-----BEGIN EC PRIVATE KEY-----", "")
+                clean_key = clean_key.replace("-----END EC PRIVATE KEY-----", "")
+                clean_key = clean_key.replace("\\n", "").replace("\n", "").replace(" ", "").replace("\r", "")
                 
-                print("✅ Key extracted (Raw Mode).", flush=True)
+                # 2. Re-wrap it manually with literal "\n" characters
+                # This creates a single-line string: "-----BEGIN...\nDATA...\n-----END..."
+                # This is the "Environment Variable Standard" format.
+                formatted_key = f"-----BEGIN EC PRIVATE KEY-----\\n{clean_key}\\n-----END EC PRIVATE KEY-----"
+                
+                print("✅ Key formatted as One-Line Literal.", flush=True)
                 
                 # --- 3. INJECT INTO ENVIRONMENT ---
-                # Set every possible variable name the SDK might look for
                 os.environ["CDP_API_KEY_ID"] = str(key_id)
                 os.environ["CDP_API_KEY_NAME"] = str(key_id)
                 
-                os.environ["CDP_API_KEY_SECRET"] = str(raw_key)
-                os.environ["CDP_API_KEY_PRIVATE_KEY"] = str(raw_key)
+                # We set the formatted key. The SDK's internal parser usually handles 
+                # literal "\n" replacement automatically.
+                os.environ["CDP_API_KEY_SECRET"] = formatted_key
+                os.environ["CDP_API_KEY_PRIVATE_KEY"] = formatted_key
                 
                 print("✅ Environment Variables Force-Set.", flush=True)
             else:
@@ -196,7 +198,7 @@ def initialize_agent(wallet_data_json: str = None):
 
     # --- 5. INITIALIZE SDK ---
     try:
-        # Initialize with empty config; it will read the Environment Variables we just set.
+        # Initialize empty (Force read from os.environ)
         wallet_config = CdpWalletProviderConfig(
             cdp_wallet_data=wallet_data_json if wallet_data_json else None
         )

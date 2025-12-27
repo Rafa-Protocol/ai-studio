@@ -47,22 +47,26 @@ tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
 # --- HELPER: KEY REPAIR ---
 def prepare_key(raw_key: str) -> str:
     """
-    Strips the private key down to its atoms and rebuilds it perfectly.
-    This fixes all Railway/Web-Form formatting issues (spaces, newlines, etc).
+    Rebuilds the PEM key perfectly.
+    1. Strips everything down to raw base64.
+    2. FIXES PADDING (The critical step).
+    3. Re-chunks into 64-char lines with headers.
     """
     if not raw_key:
         return None
         
-    # 1. Strip existing headers and cleanup
     clean = raw_key.replace("-----BEGIN EC PRIVATE KEY-----", "")
     clean = clean.replace("-----END EC PRIVATE KEY-----", "")
-    clean = "".join(clean.split()) # Remove all whitespace/newlines/spaces
+    clean = "".join(clean.split()) # Remove all whitespace
     clean = clean.replace("\\n", "") # Remove literal newlines
     
-    # 2. Re-chunk (Standard PEM format is 64 chars wide)
+    # Base64 strings must be a multiple of 4 in length.
+    missing_padding = len(clean) % 4
+    if missing_padding:
+        clean += '=' * (4 - missing_padding)
+    
     chunked = "\n".join(clean[i:i+64] for i in range(0, len(clean), 64))
     
-    # 3. Add headers back
     return f"-----BEGIN EC PRIVATE KEY-----\n{chunked}\n-----END EC PRIVATE KEY-----\n"
 
 # --- TOOL 1: MACRO CONTEXT ---

@@ -145,68 +145,44 @@ def get_crypto_price(asset: str):
 def initialize_agent(wallet_data_json: str = None):
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
     
-    # --- 1. LOAD & RECONSTRUCT CREDENTIALS ---
-    creds_json = os.getenv("CDP_CREDS_JSON")
+    # --- 1. DECODE THE TELEPORTED FILE ---
+    encoded_json = os.getenv("CDP_B64_JSON")
     key_name = None
-    perfect_pem_key = None
+    key_private = None
     
-    if creds_json:
+    if encoded_json:
         try:
-            data = json.loads(creds_json)
+            print("📦 Unpacking Credentials...", flush=True)
+            # Decode Base64 back to raw bytes, then parse JSON
+            # This bypasses ALL string formatting issues
+            decoded_bytes = base64.b64decode(encoded_json)
+            data = json.loads(decoded_bytes)
+            
             key_name = data.get("name")
-            raw_private_key = data.get("privateKey", "")
-
-            # Reconstruct PEM (Verified working)
-            clean_key = raw_private_key.replace("-----BEGIN EC PRIVATE KEY-----", "")
-            clean_key = clean_key.replace("-----END EC PRIVATE KEY-----", "")
-            clean_key = clean_key.replace("\\n", "").replace("\n", "").replace(" ", "").replace("\r", "")
+            key_private = data.get("privateKey")
+            print("✅ Credentials successfully unpacked.", flush=True)
             
-            chunked_body = "\n".join(clean_key[i:i+64] for i in range(0, len(clean_key), 64))
-            perfect_pem_key = f"-----BEGIN EC PRIVATE KEY-----\n{chunked_body}\n-----END EC PRIVATE KEY-----\n"
-            
-            print(f"✅ Key Reconstructed successfully.", flush=True)
-
         except Exception as e:
-            print(f"❌ CRITICAL: Credential processing failed: {e}", flush=True)
+            print(f"❌ CRITICAL: Failed to unpack CDP_B64_JSON: {e}", flush=True)
             raise e
     else:
-         print("❌ CRITICAL: CDP_CREDS_JSON is missing!", flush=True)
+         print("❌ CRITICAL: CDP_B64_JSON variable is missing!", flush=True)
 
     # --- 2. HANDLE WALLET SECRET ---
-    wallet_secret = os.getenv("CDP_WALLET_SECRET")
-    if not wallet_secret:
-        print("⚠️ WARNING: CDP_WALLET_SECRET missing. Using fallback.", flush=True)
-        wallet_secret = "rafa_fallback_secret_123"
+    if not os.getenv("CDP_WALLET_SECRET"):
+        print("⚠️ WARNING: CDP_WALLET_SECRET missing. Setting fallback.", flush=True)
+        os.environ["CDP_WALLET_SECRET"] = "rafa_fallback_secret_123"
 
-    # --- 3. FORCE ENVIRONMENT (Backup) ---
-    if key_name and perfect_pem_key:
-        os.environ["CDP_API_KEY_NAME"] = key_name
-        os.environ["CDP_API_KEY_PRIVATE_KEY"] = perfect_pem_key
-        # Set NEW variable names too (v0.7+ support)
-        os.environ["CDP_API_KEY_ID"] = key_name
-        os.environ["CDP_API_KEY_SECRET"] = perfect_pem_key
-        os.environ["CDP_WALLET_SECRET"] = wallet_secret
-
-    # --- 4. INITIALIZE SDK (The Shotgun Fix) ---
+    # --- 3. INITIALIZE SDK (Explicit Pass) ---
     try:
-        # We define a dict with ALL possible keys and unpack it as kwargs.
-        # This handles both 'api_key_name' (Old) and 'api_key_id' (New)
-        config_params = {
-            "api_key_name": key_name,
-            "api_key_private_key": perfect_pem_key,
-            "api_key_id": key_name,       # <--- New SDK Param
-            "api_key_secret": perfect_pem_key, # <--- New SDK Param
-            "cdp_wallet_data": wallet_data_json if wallet_data_json else None
-        }
-
-        # Remove keys that aren't valid for this specific version of Config
-        # This prevents "unexpected keyword argument" errors
-        valid_keys = CdpWalletProviderConfig.__init__.__code__.co_varnames
-        filtered_config = {k: v for k, v in config_params.items() if k in valid_keys}
+        # We pass the keys exactly as they came from the JSON. 
+        # No manual reconstruction, no stripping headers. Trust the file.
+        wallet_config = CdpWalletProviderConfig(
+            api_key_name=key_name,
+            api_key_private_key=key_private,
+            cdp_wallet_data=wallet_data_json if wallet_data_json else None
+        )
         
-        print(f"ℹ️ Config Parameters being used: {list(filtered_config.keys())}", flush=True)
-
-        wallet_config = CdpWalletProviderConfig(**filtered_config)
         wallet_provider = CdpWalletProvider(wallet_config)
         agent_kit = AgentKit(AgentKitConfig(wallet_provider=wallet_provider))
         print("✅ AgentKit Initialized Successfully!", flush=True)

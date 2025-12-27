@@ -144,30 +144,37 @@ def get_crypto_price(asset: str):
 def initialize_agent(wallet_data_json: str = None):
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
     
-    # 1. Manually Load & Clean Credentials (The Fix)
-    # This prevents the "newline" error by fixing the string format in Python
-    api_key_name = os.getenv("CDP_API_KEY_ID")
-    api_key_private_key = os.getenv("CDP_API_KEY_SECRET")
-    
-    if api_key_private_key:
-        # Replace literal "\n" characters with actual newlines
-        api_key_private_key = api_key_private_key.replace("\\n", "\n")
+    # 1. READ THE VARIABLES YOU CONFIRMED YOU HAVE
+    api_key_name = os.getenv("CDP_API_KEY_NAME")
+    api_key_private_key = os.getenv("CDP_API_KEY_PRIVATE_KEY")
 
-    # 2. Configure Wallet Provider
+    # Fallback: Check the "ID/SECRET" names just in case (the new SDK defaults)
+    if not api_key_name:
+        api_key_name = os.getenv("CDP_API_KEY_ID")
+    if not api_key_private_key:
+        api_key_private_key = os.getenv("CDP_API_KEY_SECRET")
+
+    # 2. THE RAILWAY FIX 
+    if api_key_private_key:
+        api_key_private_key = api_key_private_key.replace("\\n", "\n")
+        # Remove any accidental surrounding quotes
+        api_key_private_key = api_key_private_key.strip().strip('"').strip("'")
+
+    # 3. Configure the Wallet Provider
+    # We explicitly pass the keys so the SDK doesn't panic looking for a file
     wallet_config = CdpWalletProviderConfig(
         api_key_name=api_key_name,
         api_key_private_key=api_key_private_key,
         cdp_wallet_data=wallet_data_json if wallet_data_json else None
     )
-    wallet_provider = CdpWalletProvider(wallet_config)
 
-    # 3. Initialize AgentKit with the provider
+    # 4. Initialize
+    wallet_provider = CdpWalletProvider(wallet_config)
     agent_kit = AgentKit(AgentKitConfig(wallet_provider=wallet_provider))
 
-    # 4. Get Tools
+    # 5. Get Tools & Setup Agent (Same as before)
     agentkit_tools = get_langchain_tools(agent_kit)
     
-    # REGISTER ALL TOOLS
     tools = agentkit_tools + [
         check_market_conditions, 
         analyze_token, 

@@ -141,38 +141,34 @@ def get_crypto_price(asset: str):
 
 # --- AGENT FACTORY (UPDATED FOR KEY FIX) ---
 def initialize_agent(wallet_data_json: str = None):
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
-    
-    # --- 1. Load Variables ---
-    # We look for the names you confirmed you have set in Railway
+# 1. Load Raw Variables
     api_key_name = os.getenv("CDP_API_KEY_NAME") or os.getenv("CDP_API_KEY_ID")
     raw_private_key = os.getenv("CDP_API_KEY_PRIVATE_KEY") or os.getenv("CDP_API_KEY_SECRET")
 
-    # --- 2. THE FIX: Aggressive Key Normalization ---
+    # --- 2. THE NUCLEAR FIX: Key Reconstruction ---
     api_key_private_key = None
     if raw_private_key:
-        # A. Remove external quotes (common copy-paste error)
+        # Step A: Strip wrapping quotes
         clean_key = raw_private_key.strip().strip('"').strip("'")
         
-        # B. Fix literal "backslash n" characters (Railway specific bug)
-        clean_key = clean_key.replace("\\n", "\n")
+        # Step B: Remove the Headers & Footers temporarily
+        payload = clean_key.replace("-----BEGIN EC PRIVATE KEY-----", "")
+        payload = payload.replace("-----END EC PRIVATE KEY-----", "")
         
-        # C. Fix "mashed" keys where newlines became spaces
-        # (If the key has headers but no real newlines, we force them)
-        if "-----BEGIN EC PRIVATE KEY-----" in clean_key and "\n" not in clean_key:
-            clean_key = clean_key.replace("-----BEGIN EC PRIVATE KEY-----", "-----BEGIN EC PRIVATE KEY-----\n")
-            clean_key = clean_key.replace("-----END EC PRIVATE KEY-----", "\n-----END EC PRIVATE KEY-----")
+        # Step C: Clean the "Meat" (Remove literal \n, real newlines, and spaces)
+        # This turns the body into one clean base64 string
+        payload = payload.replace("\\n", "").replace("\n", "").replace(" ", "")
         
-        api_key_private_key = clean_key
+        # Step D: Rebuild the Key with FORCEFUL formatting
+        # This guarantees exactly ONE newline after header and before footer
+        api_key_private_key = f"-----BEGIN EC PRIVATE KEY-----\n{payload}\n-----END EC PRIVATE KEY-----"
 
-        # D. DEBUG PRINT (Check your Railway Deploy Logs for this line!)
-        print(f"🔑 DEBUG: Key Loaded. First 30 chars: {repr(api_key_private_key[:30])}")
+        print("🔑 DEBUG: Key Reconstructed Successfully.")
     
     else:
         print("❌ CRITICAL: No Private Key Variable Found!")
 
-    # --- 3. Configure Provider ---
-    # We explicitly pass the clean key so the SDK doesn't use the raw env var
+    # 3. Configure Provider
     wallet_config = CdpWalletProviderConfig(
         api_key_name=api_key_name,
         api_key_private_key=api_key_private_key,

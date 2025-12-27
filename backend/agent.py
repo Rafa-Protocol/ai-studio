@@ -141,30 +141,39 @@ def get_crypto_price(asset: str):
 
 # --- AGENT FACTORY (UPDATED FOR KEY FIX) ---
 def initialize_agent(wallet_data_json: str = None):
-# 1. Load Raw Variables
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
+    
+    # 1. Load Raw Variables
     api_key_name = os.getenv("CDP_API_KEY_NAME") or os.getenv("CDP_API_KEY_ID")
     raw_private_key = os.getenv("CDP_API_KEY_PRIVATE_KEY") or os.getenv("CDP_API_KEY_SECRET")
 
-    # --- 2. THE NUCLEAR FIX: Key Reconstruction ---
+    # --- 2. THE STRICT FIX: PEM Reconstruction ---
     api_key_private_key = None
     if raw_private_key:
-        # Step A: Strip wrapping quotes
-        clean_key = raw_private_key.strip().strip('"').strip("'")
-        
-        # Step B: Remove the Headers & Footers temporarily
-        payload = clean_key.replace("-----BEGIN EC PRIVATE KEY-----", "")
-        payload = payload.replace("-----END EC PRIVATE KEY-----", "")
-        
-        # Step C: Clean the "Meat" (Remove literal \n, real newlines, and spaces)
-        # This turns the body into one clean base64 string
-        payload = payload.replace("\\n", "").replace("\n", "").replace(" ", "")
-        
-        # Step D: Rebuild the Key with FORCEFUL formatting
-        # This guarantees exactly ONE newline after header and before footer
-        api_key_private_key = f"-----BEGIN EC PRIVATE KEY-----\n{payload}\n-----END EC PRIVATE KEY-----"
+        try:
+            # Step A: Strip wrapping quotes & whitespace
+            clean_key = raw_private_key.strip().strip('"').strip("'")
+            
+            # Step B: Isolate the Base64 Body (Remove Headers/Footers)
+            payload = clean_key.replace("-----BEGIN EC PRIVATE KEY-----", "")
+            payload = payload.replace("-----END EC PRIVATE KEY-----", "")
+            
+            # Step C: Remove ALL "garbage" (literals \n, real newlines, spaces)
+            # This leaves us with a pure, continuous Base64 string
+            payload = payload.replace("\\n", "").replace("\n", "").replace(" ", "")
+            
+            # Step D: Chunk into 64-character lines (Standard PEM Format)
+            # This is the step that fixes the "Invalid Key" error!
+            chunked_body = "\n".join(payload[i:i+64] for i in range(0, len(payload), 64))
+            
+            # Step E: Reassemble with correct headers
+            api_key_private_key = f"-----BEGIN EC PRIVATE KEY-----\n{chunked_body}\n-----END EC PRIVATE KEY-----\n"
+            
+            print("🔑 DEBUG: Key Reconstructed with 64-char lines.")
+            
+        except Exception as e:
+            print(f"❌ CRITICAL: Key reconstruction failed: {e}")
 
-        print("🔑 DEBUG: Key Reconstructed Successfully.")
-    
     else:
         print("❌ CRITICAL: No Private Key Variable Found!")
 

@@ -48,13 +48,13 @@ tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
 # --- HELPER: KEY REPAIR ---
 def prepare_key(raw_key: str) -> str:
     """
-    Rebuilds the PEM key perfectly to fix Railway flattening issues.
-    Strips it down to raw base64 and re-adds standard headers.
+    Strips the private key down to its atoms and rebuilds it perfectly.
+    This fixes all Railway/Web-Form formatting issues (spaces, newlines, etc).
     """
     if not raw_key:
         return None
         
-    # 1. Strip headers and cleanup
+    # 1. Strip existing headers and cleanup
     clean = raw_key.replace("-----BEGIN EC PRIVATE KEY-----", "")
     clean = clean.replace("-----END EC PRIVATE KEY-----", "")
     clean = "".join(clean.split()) # Remove all whitespace/newlines/spaces
@@ -166,32 +166,21 @@ def get_crypto_price(asset: str):
 def initialize_agent(wallet_data_json: str = None):
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
 
-    # --- 1. READ VARIABLES FROM RAILWAY ---
+    # --- 1. GET & REPAIR CREDENTIALS ---
     api_key_name = os.getenv("CDP_API_KEY_NAME")
     raw_private_key = os.getenv("CDP_API_KEY_PRIVATE_KEY")
     wallet_secret = os.getenv("CDP_WALLET_SECRET")
 
-    # --- 2. REPAIR KEY (The Railway Fix) ---
-    # We use the helper function to ensure standard PEM format
+    # Repair the key format
     final_private_key = prepare_key(raw_private_key)
 
     if not api_key_name or not final_private_key:
         print("❌ CRITICAL: CDP_API_KEY_NAME or CDP_API_KEY_PRIVATE_KEY is missing/invalid.", flush=True)
 
-    # --- 3. CONFIGURE CDP SDK (Validation Step) ---
-    # This verifies authentication BEFORE AgentKit tries to load.
+    # --- 2. INITIALIZE AGENTKIT ---
     try:
-        print("Auth: Configuring CDP SDK...", flush=True)
-        Cdp.configure(api_key_name, final_private_key)
-        print("✅ CDP SDK Configured successfully.", flush=True)
-    except Exception as e:
-        print(f"❌ FATAL: CDP SDK refused the key: {e}", flush=True)
-        # If this fails, the key is wrong. No point continuing.
-        raise e
-
-    # --- 4. INITIALIZE AGENTKIT ---
-    try:
-        # We pass the cleaned keys directly to the config
+        # We pass the cleaned keys directly to the config.
+        # We trust AgentKit to handle the auth validation now that the key format is fixed.
         wallet_config = CdpWalletProviderConfig(
             api_key_name=api_key_name,
             api_key_private_key=final_private_key,
@@ -204,6 +193,7 @@ def initialize_agent(wallet_data_json: str = None):
 
     except Exception as e:
         print(f"❌ FATAL AGENTKIT ERROR: {e}", flush=True)
+        # Check logs if this happens: likely still a key name mismatch
         raise e
 
     # 5. Get Tools & Setup Agent

@@ -139,22 +139,32 @@ def get_crypto_price(asset: str):
     except:
         return "Price Unavailable"
 
-# --- AGENT FACTORY (UPDATED) ---
+# --- AGENT FACTORY (UPDATED FOR KEY FIX) ---
 
 def initialize_agent(wallet_data_json: str = None):
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
     
-    # 1. Configure Wallet Provider
-    # Using CdpWalletProviderConfig to handle wallet data or ENV vars
+    # 1. Manually Load & Clean Credentials (The Fix)
+    # This prevents the "newline" error by fixing the string format in Python
+    api_key_name = os.getenv("CDP_API_KEY_ID")
+    api_key_private_key = os.getenv("CDP_API_KEY_SECRET")
+    
+    if api_key_private_key:
+        # Replace literal "\n" characters with actual newlines
+        api_key_private_key = api_key_private_key.replace("\\n", "\n")
+
+    # 2. Configure Wallet Provider
     wallet_config = CdpWalletProviderConfig(
+        api_key_name=api_key_name,
+        api_key_private_key=api_key_private_key,
         cdp_wallet_data=wallet_data_json if wallet_data_json else None
     )
     wallet_provider = CdpWalletProvider(wallet_config)
 
-    # 2. Initialize AgentKit with the provider
+    # 3. Initialize AgentKit with the provider
     agent_kit = AgentKit(AgentKitConfig(wallet_provider=wallet_provider))
 
-    # 3. Get Tools using the new get_langchain_tools function
+    # 4. Get Tools
     agentkit_tools = get_langchain_tools(agent_kit)
     
     # REGISTER ALL TOOLS
@@ -196,7 +206,6 @@ def initialize_agent(wallet_data_json: str = None):
     - Be concise. "Quant Speak" (e.g., "Alpha", "RSI divergence", "Institutional flows").
     - If recommending a trade, end with: `ACTION: BUY [AMOUNT] [TICKER]`
     - Use /// CHART_DATA format for visuals.
-    - Check portfolio before suggesting trades.
 
     **VISUAL OUTPUT PROTOCOL:**
     If the user asks a question that is best answered with a chart (e.g., "performance", "allocation", "compare X vs Y"), you MUST include a hidden JSON block at the end of your response.
@@ -249,40 +258,31 @@ def initialize_agent(wallet_data_json: str = None):
         state_modifier=system_message
     )
 
-    # Return the executor and the agent_kit (which contains the wallet provider)
     return agent_executor, agent_kit
 
 # --- WALLET EXPORT HELPER (UNIVERSAL) ---
 def get_agent_address(agent_kit):
     try:
-        # STRATEGY 1: Inspect the Provider directly
         provider = agent_kit.wallet_provider
         
-        # Method A: Check public 'wallet' attribute
-        wallet = getattr(provider, "wallet", None)
-        if not wallet:
-            # Method B: Check private '_wallet' attribute
-            wallet = getattr(provider, "_wallet", None)
-            
+        # Strategy 1: Check public/private attributes
+        wallet = getattr(provider, "wallet", None) or getattr(provider, "_wallet", None)
         if wallet:
             if hasattr(wallet, "default_address"):
                 return wallet.default_address.address_id
             if hasattr(wallet, "addresses") and len(wallet.addresses) > 0:
                 return wallet.addresses[0].id
                 
-        # STRATEGY 2: The "Tool Hack"
-        # Since we can't reliably predict the internal structure of the new SDK,
-        # we ask the agent's own tools to tell us the address.
+        # Strategy 2: The "Tool Hack"
         tools = get_langchain_tools(agent_kit)
         for t in tools:
             if "get_wallet_details" in t.name:
                 result = t.invoke({})
-                # Use regex to find the address in the tool's output string
                 match = re.search(r"0x[a-fA-F0-9]{40}", str(result))
                 if match:
                     return match.group(0)
 
-        # STRATEGY 3: Export (Last Resort - often missing in new SDKs)
+        # Strategy 3: Export
         data = provider.export_wallet()
         if hasattr(data, "to_dict"):
             data = data.to_dict()

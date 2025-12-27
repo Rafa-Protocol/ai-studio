@@ -145,56 +145,59 @@ def get_crypto_price(asset: str):
 def initialize_agent(wallet_data_json: str = None):
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
     
-    # --- 1. UNPACK CREDENTIALS (Teleport Method) ---
+    # --- 1. UNPACK & REFORMAT CREDENTIALS ---
     encoded_json = os.getenv("CDP_B64_JSON")
-    key_name = None
-    key_private = None
     
     if encoded_json:
         try:
-            print("📦 Unpacking Credentials...", flush=True)
+            print("📦 Unpacking Base64 Credentials...", flush=True)
             decoded_bytes = base64.b64decode(encoded_json)
             data = json.loads(decoded_bytes)
-            key_name = data.get("name")
-            key_private = data.get("privateKey", "")
             
-            # --- 2. RE-FORMAT KEY (Prevents Padding Errors) ---
-            # Even coming from a file, we force perfect formatting to be safe.
-            clean_key = key_private.replace("-----BEGIN EC PRIVATE KEY-----", "")
+            key_name = data.get("name")
+            raw_key = data.get("privateKey", "")
+            
+            # FORMATTING FIX: Rebuild the key perfectly to avoid "Padding" errors
+            # 1. Strip everything down to raw base64 data
+            clean_key = raw_key.replace("-----BEGIN EC PRIVATE KEY-----", "")
             clean_key = clean_key.replace("-----END EC PRIVATE KEY-----", "")
             clean_key = clean_key.replace("\\n", "").replace("\n", "").replace(" ", "").replace("\r", "")
             
-            # Rebuild perfect PEM block
+            # 2. Re-chunk into 64-char lines
             chunked_body = "\n".join(clean_key[i:i+64] for i in range(0, len(clean_key), 64))
+            
+            # 3. Add Headers
             perfect_key = f"-----BEGIN EC PRIVATE KEY-----\n{chunked_body}\n-----END EC PRIVATE KEY-----\n"
             
-            print("✅ Key unpacked and re-formatted successfully.", flush=True)
+            print("✅ Key reformatted successfully.", flush=True)
+
+            # --- 2. GLOBAL ENVIRONMENT INJECTION ---
+            # We strictly set the variables the Error Message demanded.
+            # This "tricks" the SDK into thinking they were set in Railway.
+            os.environ["CDP_API_KEY_ID"] = key_name
+            os.environ["CDP_API_KEY_SECRET"] = perfect_key
+            
+            # Set the "Old" names too, just in case the SDK version is mixed
+            os.environ["CDP_API_KEY_NAME"] = key_name
+            os.environ["CDP_API_KEY_PRIVATE_KEY"] = perfect_key
+            
+            print("✅ Environment Variables Force-Set.", flush=True)
 
         except Exception as e:
-            print(f"❌ CRITICAL: Failed to unpack CDP_B64_JSON: {e}", flush=True)
+            print(f"❌ CRITICAL: Failed to unpack keys: {e}", flush=True)
             raise e
     else:
-         print("❌ CRITICAL: CDP_B64_JSON variable is missing!", flush=True)
+        print("❌ CRITICAL: CDP_B64_JSON is missing!", flush=True)
 
     # --- 3. HANDLE WALLET SECRET ---
     if not os.getenv("CDP_WALLET_SECRET"):
-        print("⚠️ WARNING: CDP_WALLET_SECRET missing. Setting fallback.", flush=True)
+        print("⚠️ WARNING: CDP_WALLET_SECRET missing. Setting default.", flush=True)
         os.environ["CDP_WALLET_SECRET"] = "rafa_fallback_secret_123"
 
-    # --- 4. INJECT INTO ENVIRONMENT (The "Missing Vars" Fix) ---
-    # We set these directly in the OS so the SDK finds them automatically.
-    # We set BOTH the old names and new names to cover all bases.
-    if key_name and perfect_key:
-        os.environ["CDP_API_KEY_ID"] = key_name           # New SDK Name
-        os.environ["CDP_API_KEY_SECRET"] = perfect_key    # New SDK Name
-        os.environ["CDP_API_KEY_NAME"] = key_name         # Old SDK Name
-        os.environ["CDP_API_KEY_PRIVATE_KEY"] = perfect_key # Old SDK Name
-        print("✅ Credentials injected into System Environment.", flush=True)
-
-    # --- 5. INITIALIZE SDK ---
+    # --- 4. INITIALIZE SDK (The Empty Init) ---
     try:
-        # We Initialize config WITHOUT explicit keys. 
-        # The SDK will look at the os.environ variables we just set.
+        # We pass NO arguments. This forces the SDK to read the os.environ 
+        # variables we just set above.
         wallet_config = CdpWalletProviderConfig(
             cdp_wallet_data=wallet_data_json if wallet_data_json else None
         )

@@ -144,42 +144,47 @@ def get_crypto_price(asset: str):
 def initialize_agent(wallet_data_json: str = None):
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
     
-    # --- 1. LOAD CREDENTIALS FROM JSON ---
+    # --- 1. Load from JSON ---
     creds_json = os.getenv("CDP_CREDS_JSON")
     if not creds_json:
-        print("❌ CRITICAL: CDP_CREDS_JSON variable is missing!", flush=True)
+        print("❌ CRITICAL: CDP_CREDS_JSON is missing.", flush=True)
+        return None, None # Fail gracefully or raise error
     
     try:
         data = json.loads(creds_json)
         key_name = data.get("name")
-        key_private = data.get("privateKey")
+        raw_private_key = data.get("privateKey", "")
+
+        # --- 2. THE PADDING FIX ---
+        # The SDK sometimes fails if the key has headers but bad internal spacing.
+        # We strip it down to the raw code and rebuild it perfectly.
         
-        # --- 2. ENVIRONMENT INJECTION (The Fix) ---
-        # The SDK demands these specific Env Vars. We set them dynamically 
-        # so you don't have to manage them in Railway.
+        # A. Remove Headers/Footers/Whitespace
+        clean_key = raw_private_key.replace("-----BEGIN EC PRIVATE KEY-----", "")
+        clean_key = clean_key.replace("-----END EC PRIVATE KEY-----", "")
+        clean_key = clean_key.replace("\\n", "").replace("\n", "").replace(" ", "").replace("\r", "")
         
-        # Map JSON 'name' -> SDK 'CDP_API_KEY_NAME' (and ID for safety)
+        # B. Rebuild with standard PEM formatting (64 chars per line)
+        # This fixes the "Incorrect Padding" error by ensuring the structure is mathematically perfect.
+        chunked_body = "\n".join(clean_key[i:i+64] for i in range(0, len(clean_key), 64))
+        perfect_pem_key = f"-----BEGIN EC PRIVATE KEY-----\n{chunked_body}\n-----END EC PRIVATE KEY-----\n"
+
+        # --- 3. Inject into Environment ---
         os.environ["CDP_API_KEY_NAME"] = key_name
-        os.environ["CDP_API_KEY_ID"] = key_name  # New SDK version might check this
+        os.environ["CDP_API_KEY_PRIVATE_KEY"] = perfect_pem_key
         
-        # Map JSON 'privateKey' -> SDK 'CDP_API_KEY_PRIVATE_KEY' (and SECRET)
-        os.environ["CDP_API_KEY_PRIVATE_KEY"] = key_private
-        os.environ["CDP_API_KEY_SECRET"] = key_private # New SDK version might check this
-        
-        print("✅ Credentials injected into Environment.", flush=True)
-        
+        print("✅ Credentials sanitized and injected.", flush=True)
+
     except Exception as e:
-        print(f"❌ CRITICAL: Failed to parse/inject JSON creds: {e}", flush=True)
+        print(f"❌ CRITICAL: Failed to process credentials: {e}", flush=True)
 
-    # --- 3. CHECK WALLET SECRET ---
-    # This must be set in Railway. If missing, we warn.
+    # --- 4. Wallet Secret Check ---
     if not os.getenv("CDP_WALLET_SECRET"):
-        print("⚠️ WARNING: CDP_WALLET_SECRET is missing. Using default insecure mode (if allowed).", flush=True)
+        print("⚠️ WARNING: CDP_WALLET_SECRET is missing!", flush=True)
 
-    # --- 4. CONFIGURE PROVIDER ---
-    # We pass None for keys because we just set them in the Environment (os.environ)
-    # The SDK will automatically pick them up from there.
+    # --- 5. Initialize SDK ---
     try:
+        # We pass None because we set the Env Vars above
         wallet_config = CdpWalletProviderConfig(
             cdp_wallet_data=wallet_data_json if wallet_data_json else None
         )

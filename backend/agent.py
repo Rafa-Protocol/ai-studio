@@ -145,7 +145,7 @@ def get_crypto_price(asset: str):
 def initialize_agent(wallet_data_json: str = None):
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
     
-    # --- 1. DECODE THE TELEPORTED FILE ---
+    # --- 1. UNPACK CREDENTIALS (Teleport Method) ---
     encoded_json = os.getenv("CDP_B64_JSON")
     key_name = None
     key_private = None
@@ -153,33 +153,49 @@ def initialize_agent(wallet_data_json: str = None):
     if encoded_json:
         try:
             print("📦 Unpacking Credentials...", flush=True)
-            # Decode Base64 back to raw bytes, then parse JSON
-            # This bypasses ALL string formatting issues
             decoded_bytes = base64.b64decode(encoded_json)
             data = json.loads(decoded_bytes)
-            
             key_name = data.get("name")
-            key_private = data.get("privateKey")
-            print("✅ Credentials successfully unpacked.", flush=True)
+            key_private = data.get("privateKey", "")
             
+            # --- 2. RE-FORMAT KEY (Prevents Padding Errors) ---
+            # Even coming from a file, we force perfect formatting to be safe.
+            clean_key = key_private.replace("-----BEGIN EC PRIVATE KEY-----", "")
+            clean_key = clean_key.replace("-----END EC PRIVATE KEY-----", "")
+            clean_key = clean_key.replace("\\n", "").replace("\n", "").replace(" ", "").replace("\r", "")
+            
+            # Rebuild perfect PEM block
+            chunked_body = "\n".join(clean_key[i:i+64] for i in range(0, len(clean_key), 64))
+            perfect_key = f"-----BEGIN EC PRIVATE KEY-----\n{chunked_body}\n-----END EC PRIVATE KEY-----\n"
+            
+            print("✅ Key unpacked and re-formatted successfully.", flush=True)
+
         except Exception as e:
             print(f"❌ CRITICAL: Failed to unpack CDP_B64_JSON: {e}", flush=True)
             raise e
     else:
          print("❌ CRITICAL: CDP_B64_JSON variable is missing!", flush=True)
 
-    # --- 2. HANDLE WALLET SECRET ---
+    # --- 3. HANDLE WALLET SECRET ---
     if not os.getenv("CDP_WALLET_SECRET"):
         print("⚠️ WARNING: CDP_WALLET_SECRET missing. Setting fallback.", flush=True)
         os.environ["CDP_WALLET_SECRET"] = "rafa_fallback_secret_123"
 
-    # --- 3. INITIALIZE SDK (Explicit Pass) ---
+    # --- 4. INJECT INTO ENVIRONMENT (The "Missing Vars" Fix) ---
+    # We set these directly in the OS so the SDK finds them automatically.
+    # We set BOTH the old names and new names to cover all bases.
+    if key_name and perfect_key:
+        os.environ["CDP_API_KEY_ID"] = key_name           # New SDK Name
+        os.environ["CDP_API_KEY_SECRET"] = perfect_key    # New SDK Name
+        os.environ["CDP_API_KEY_NAME"] = key_name         # Old SDK Name
+        os.environ["CDP_API_KEY_PRIVATE_KEY"] = perfect_key # Old SDK Name
+        print("✅ Credentials injected into System Environment.", flush=True)
+
+    # --- 5. INITIALIZE SDK ---
     try:
-        # We pass the keys exactly as they came from the JSON. 
-        # No manual reconstruction, no stripping headers. Trust the file.
+        # We Initialize config WITHOUT explicit keys. 
+        # The SDK will look at the os.environ variables we just set.
         wallet_config = CdpWalletProviderConfig(
-            api_key_name=key_name,
-            api_key_private_key=key_private,
             cdp_wallet_data=wallet_data_json if wallet_data_json else None
         )
         

@@ -144,63 +144,52 @@ def get_crypto_price(asset: str):
 def initialize_agent(wallet_data_json: str = None):
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
     
-    print("🔍 DIAGNOSTIC: Starting Agent Initialization...", flush=True)
-
-    # --- 1. Load & validate CDP_CREDS_JSON ---
+    # --- 1. LOAD CREDENTIALS FROM JSON ---
     creds_json = os.getenv("CDP_CREDS_JSON")
-    api_key_name = None
-    api_key_private_key = None
-
     if not creds_json:
-        print("❌ CRITICAL: 'CDP_CREDS_JSON' variable is EMPTY or MISSING in Railway!", flush=True)
-    else:
-        print(f"✅ Found CDP_CREDS_JSON (Length: {len(creds_json)} chars). Parsing...", flush=True)
-        try:
-            data = json.loads(creds_json)
-            # Print available keys (hidden values) to debug structure
-            print(f"ℹ️ JSON Keys found: {list(data.keys())}", flush=True)
-            
-            api_key_name = data.get("name")
-            api_key_private_key = data.get("privateKey")
+        print("❌ CRITICAL: CDP_CREDS_JSON variable is missing!", flush=True)
+    
+    try:
+        data = json.loads(creds_json)
+        key_name = data.get("name")
+        key_private = data.get("privateKey")
+        
+        # --- 2. ENVIRONMENT INJECTION (The Fix) ---
+        # The SDK demands these specific Env Vars. We set them dynamically 
+        # so you don't have to manage them in Railway.
+        
+        # Map JSON 'name' -> SDK 'CDP_API_KEY_NAME' (and ID for safety)
+        os.environ["CDP_API_KEY_NAME"] = key_name
+        os.environ["CDP_API_KEY_ID"] = key_name  # New SDK version might check this
+        
+        # Map JSON 'privateKey' -> SDK 'CDP_API_KEY_PRIVATE_KEY' (and SECRET)
+        os.environ["CDP_API_KEY_PRIVATE_KEY"] = key_private
+        os.environ["CDP_API_KEY_SECRET"] = key_private # New SDK version might check this
+        
+        print("✅ Credentials injected into Environment.", flush=True)
+        
+    except Exception as e:
+        print(f"❌ CRITICAL: Failed to parse/inject JSON creds: {e}", flush=True)
 
-            if not api_key_name:
-                print("❌ ERROR: JSON parsed, but 'name' field is missing.", flush=True)
-            if not api_key_private_key:
-                print("❌ ERROR: JSON parsed, but 'privateKey' field is missing.", flush=True)
-            
-        except json.JSONDecodeError as e:
-            print(f"❌ CRITICAL: JSON Decode Failed! Did you copy the whole file? Error: {e}", flush=True)
-        except Exception as e:
-            print(f"❌ CRITICAL: Unexpected error parsing JSON: {e}", flush=True)
-
-    # --- 2. Configure Provider (With explicit error handling) ---
-    if not api_key_name or not api_key_private_key:
-        print("⚠️ WARNING: Falling back to checking legacy environment variables...", flush=True)
-        # Attempt fallback only if JSON failed
-        api_key_name = os.getenv("CDP_API_KEY_NAME") or os.getenv("CDP_API_KEY_ID")
-        api_key_private_key = os.getenv("CDP_API_KEY_PRIVATE_KEY") or os.getenv("CDP_API_KEY_SECRET")
-
-    # Check for Wallet Secret (Required by SDK)
+    # --- 3. CHECK WALLET SECRET ---
+    # This must be set in Railway. If missing, we warn.
     if not os.getenv("CDP_WALLET_SECRET"):
-         print("❌ CRITICAL: 'CDP_WALLET_SECRET' variable is MISSING!", flush=True)
+        print("⚠️ WARNING: CDP_WALLET_SECRET is missing. Using default insecure mode (if allowed).", flush=True)
 
-    print(f"ℹ️ Final Config - Key Name Present: {bool(api_key_name)} | Private Key Present: {bool(api_key_private_key)}", flush=True)
-   
-    # 3. Configure Provider
+    # --- 4. CONFIGURE PROVIDER ---
+    # We pass None for keys because we just set them in the Environment (os.environ)
+    # The SDK will automatically pick them up from there.
     try:
         wallet_config = CdpWalletProviderConfig(
-            api_key_name=api_key_name,
-            api_key_private_key=api_key_private_key,
             cdp_wallet_data=wallet_data_json if wallet_data_json else None
         )
         wallet_provider = CdpWalletProvider(wallet_config)
         agent_kit = AgentKit(AgentKitConfig(wallet_provider=wallet_provider))
-        print("✅ AgentKit Initialized Successfully!", flush=True)
+        print("✅ AgentKit Initialized!", flush=True)
         
     except Exception as e:
         print(f"❌ FATAL SDK ERROR: {e}", flush=True)
-        # Re-raise so the app crashes visibly rather than silently failing
-        raise ValueError(f"AgentKit Init Failed: {e}")
+        raise e
 
     # 5. Get Tools & Setup Agent
     agentkit_tools = get_langchain_tools(agent_kit)

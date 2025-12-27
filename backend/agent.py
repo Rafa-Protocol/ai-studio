@@ -145,7 +145,7 @@ def get_crypto_price(asset: str):
 def initialize_agent(wallet_data_json: str = None):
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
     
-    # --- 1. UNPACK FROM BASE64 (The Teleport) ---
+    # --- 1. UNPACK CREDENTIALS ---
     encoded_json = os.getenv("CDP_B64_JSON")
     if not encoded_json:
         print("❌ CRITICAL: CDP_B64_JSON is missing!", flush=True)
@@ -153,56 +153,61 @@ def initialize_agent(wallet_data_json: str = None):
 
     try:
         print("📦 Unpacking Credentials...", flush=True)
-        # Decode the file exactly as it was on your local machine
         decoded_bytes = base64.b64decode(encoded_json)
         data = json.loads(decoded_bytes)
         
-        # Extract the raw values
-        # We look for 'name' OR 'id' because the SDK varies
-        key_name = data.get("name") or data.get("apiKeyName") or data.get("id")
+        # Get ID and Raw Key
+        key_id = data.get("name") or data.get("apiKeyName") or data.get("id")
         raw_key = data.get("privateKey") or data.get("apiKeySecret") or data.get("secret")
 
-        if not key_name or not raw_key:
-            raise ValueError(f"JSON missing required fields. Found: {list(data.keys())}")
+        if not key_id or not raw_key:
+            raise ValueError(f"JSON missing keys. Found: {list(data.keys())}")
 
-        # --- 2. THE CLEANER (Fixes 'Incorrect Padding') ---
-        # This is the step that fixes the error.
-        # We ensure the key has REAL newlines, not literal "\n" characters.
+        # --- 2. KEY RECONSTRUCTION (The Fix) ---
+        # The logs showed your key is missing headers. We must add them.
         
-        final_key = raw_key
-        
-        # A. Fix double-escaping (common in JSON strings)
-        if "\\n" in final_key:
-            final_key = final_key.replace("\\n", "\n")
-            
-        # B. Remove Windows formatting artifacts (if you are on Windows)
-        final_key = final_key.replace("\r", "")
-        
-        # C. Ensure it has headers (The SDK requires PEM format)
-        if "-----BEGIN" not in final_key:
-             # If headers are missing, the key is corrupt. 
-             # We try to use the raw version, assuming it might be a raw seed.
-             print("⚠️ Key missing headers. Using raw key...", flush=True)
-        else:
-             print("✅ Key format looks correct (PEM headers found).", flush=True)
+        # A. Clean the raw string
+        clean_body = raw_key.replace("-----BEGIN EC PRIVATE KEY-----", "")
+        clean_body = clean_body.replace("-----END EC PRIVATE KEY-----", "")
+        clean_body = clean_body.replace("\\n", "").replace("\n", "").replace(" ", "").replace("\r", "")
+        clean_body = clean_body.strip()
 
-        print(f"ℹ️ Loaded Key ID: {key_name}", flush=True)
+        # B. Fix Padding (Crypto library requirement)
+        missing_padding = len(clean_body) % 4
+        if missing_padding:
+            clean_body += '=' * (4 - missing_padding)
+
+        # C. Rebuild PEM with Headers (SDK requirement)
+        # Split into 64-character lines
+        chunked_body = "\n".join(clean_body[i:i+64] for i in range(0, len(clean_body), 64))
+        final_pem_key = f"-----BEGIN EC PRIVATE KEY-----\n{chunked_body}\n-----END EC PRIVATE KEY-----\n"
+        
+        print("✅ Key headers and padding reconstructed.", flush=True)
+        print(f"ℹ️ Key ID: {key_id}", flush=True)
+
+        # --- 3. INJECT INTO ENVIRONMENT (Crucial) ---
+        # We inject the FIXED key into the environment. 
+        # This acts as a safety net if the explicit config fails.
+        os.environ["CDP_API_KEY_ID"] = str(key_id)
+        os.environ["CDP_API_KEY_NAME"] = str(key_id)
+        os.environ["CDP_API_KEY_SECRET"] = final_pem_key
+        os.environ["CDP_API_KEY_PRIVATE_KEY"] = final_pem_key
+        
+        # Handle Secret
+        if not os.getenv("CDP_WALLET_SECRET"):
+            print("⚠️ WARNING: CDP_WALLET_SECRET missing. Setting default.", flush=True)
+            os.environ["CDP_WALLET_SECRET"] = "rafa_fallback_secret_123"
 
     except Exception as e:
         print(f"❌ CRITICAL: Failed to unpack keys: {e}", flush=True)
         raise e
 
-    # --- 3. HANDLE WALLET SECRET ---
-    if not os.getenv("CDP_WALLET_SECRET"):
-        print("⚠️ WARNING: CDP_WALLET_SECRET missing. Setting default.", flush=True)
-        os.environ["CDP_WALLET_SECRET"] = "rafa_fallback_secret_123"
-
-    # --- 4. INITIALIZE SDK (Direct Injection) ---
+    # --- 4. INITIALIZE SDK ---
     try:
-        # We pass the cleaned strings directly.
+        # We pass the RECONSTRUCTED key explicitly.
         wallet_config = CdpWalletProviderConfig(
-            api_key_name=str(key_name),
-            api_key_private_key=final_key, # The cleaned key
+            api_key_name=str(key_id),
+            api_key_private_key=final_pem_key,
             cdp_wallet_data=wallet_data_json if wallet_data_json else None
         )
         

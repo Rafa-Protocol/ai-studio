@@ -145,7 +145,7 @@ def get_crypto_price(asset: str):
 def initialize_agent(wallet_data_json: str = None):
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
     
-    # --- 1. UNPACK & REFORMAT CREDENTIALS ---
+    # --- 1. UNPACK CREDENTIALS ---
     encoded_json = os.getenv("CDP_B64_JSON")
     
     if encoded_json:
@@ -154,32 +154,45 @@ def initialize_agent(wallet_data_json: str = None):
             decoded_bytes = base64.b64decode(encoded_json)
             data = json.loads(decoded_bytes)
             
-            key_name = data.get("name")
-            raw_key = data.get("privateKey", "")
+            # --- DEBUG: Print found keys ---
+            # This tells us exactly what is in your file
+            print(f"ℹ️ JSON Keys Found: {list(data.keys())}", flush=True)
             
-            # FORMATTING FIX: Rebuild the key perfectly to avoid "Padding" errors
-            # 1. Strip everything down to raw base64 data
+            # --- ROBUST KEY FINDER ---
+            # Try every possible name for the ID field
+            key_name = data.get("name") or data.get("apiKeyName") or data.get("id")
+            
+            # Try every possible name for the Private Key field
+            raw_key = data.get("privateKey") or data.get("apiKeySecret") or data.get("secret") or ""
+
+            # Check if we found them
+            if not key_name:
+                raise ValueError(f"Could not find 'name' or 'apiKeyName' in JSON. Keys found: {list(data.keys())}")
+            
+            if not raw_key:
+                raise ValueError("Could not find 'privateKey' in JSON.")
+
+            # --- REFORMAT KEY (Padding Fix) ---
             clean_key = raw_key.replace("-----BEGIN EC PRIVATE KEY-----", "")
             clean_key = clean_key.replace("-----END EC PRIVATE KEY-----", "")
             clean_key = clean_key.replace("\\n", "").replace("\n", "").replace(" ", "").replace("\r", "")
             
-            # 2. Re-chunk into 64-char lines
             chunked_body = "\n".join(clean_key[i:i+64] for i in range(0, len(clean_key), 64))
-            
-            # 3. Add Headers
             perfect_key = f"-----BEGIN EC PRIVATE KEY-----\n{chunked_body}\n-----END EC PRIVATE KEY-----\n"
             
             print("✅ Key reformatted successfully.", flush=True)
 
-            # --- 2. GLOBAL ENVIRONMENT INJECTION ---
-            # We strictly set the variables the Error Message demanded.
-            # This "tricks" the SDK into thinking they were set in Railway.
-            os.environ["CDP_API_KEY_ID"] = key_name
-            os.environ["CDP_API_KEY_SECRET"] = perfect_key
+            # --- 2. ENVIRONMENT INJECTION ---
+            # We explicitly cast to str() to prevent the NoneType error
+            str_name = str(key_name)
+            str_key = str(perfect_key)
+
+            os.environ["CDP_API_KEY_ID"] = str_name
+            os.environ["CDP_API_KEY_SECRET"] = str_key
             
-            # Set the "Old" names too, just in case the SDK version is mixed
-            os.environ["CDP_API_KEY_NAME"] = key_name
-            os.environ["CDP_API_KEY_PRIVATE_KEY"] = perfect_key
+            # Legacy support
+            os.environ["CDP_API_KEY_NAME"] = str_name
+            os.environ["CDP_API_KEY_PRIVATE_KEY"] = str_key
             
             print("✅ Environment Variables Force-Set.", flush=True)
 
@@ -194,10 +207,9 @@ def initialize_agent(wallet_data_json: str = None):
         print("⚠️ WARNING: CDP_WALLET_SECRET missing. Setting default.", flush=True)
         os.environ["CDP_WALLET_SECRET"] = "rafa_fallback_secret_123"
 
-    # --- 4. INITIALIZE SDK (The Empty Init) ---
+    # --- 4. INITIALIZE SDK ---
     try:
-        # We pass NO arguments. This forces the SDK to read the os.environ 
-        # variables we just set above.
+        # Initialize with empty config; it will read the Environment Variables we just set.
         wallet_config = CdpWalletProviderConfig(
             cdp_wallet_data=wallet_data_json if wallet_data_json else None
         )

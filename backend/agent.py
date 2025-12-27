@@ -19,12 +19,10 @@ try:
     from coinbase_agentkit import AgentKit, AgentKitConfig
     from coinbase_agentkit import CdpEvmWalletProvider as CdpWalletProvider
     from coinbase_agentkit import CdpEvmWalletProviderConfig as CdpWalletProviderConfig
-    print("✅ Loaded CdpEvmWalletProvider (New API)")
 except ImportError:
     try:
         # 2. Fallback to OLD class name (v0.1.x)
         from coinbase_agentkit import AgentKit, AgentKitConfig, CdpWalletProvider, CdpWalletProviderConfig
-        print("⚠️ Loaded CdpWalletProvider (Old API)")
     except ImportError:
         # 3. Emergency Fallback for Submodules
         from coinbase_agentkit import AgentKit, AgentKitConfig
@@ -48,25 +46,33 @@ tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
 def prepare_key(raw_key: str) -> str:
     """
     Rebuilds the PEM key perfectly.
-    1. Strips everything down to raw base64.
-    2. FIXES PADDING (The critical step).
-    3. Re-chunks into 64-char lines with headers.
+    Fixes: Quotes, spaces, newlines, missing padding, bad formatting.
     """
     if not raw_key:
         return None
         
-    clean = raw_key.replace("-----BEGIN EC PRIVATE KEY-----", "")
-    clean = clean.replace("-----END EC PRIVATE KEY-----", "")
-    clean = "".join(clean.split()) # Remove all whitespace
-    clean = clean.replace("\\n", "") # Remove literal newlines
+    # 1. Clean formatting artifacts
+    # Strip quotes (User might have pasted "KEY" instead of KEY)
+    clean = raw_key.strip().strip('"').strip("'")
     
+    # 2. Strip existing headers to get the raw body
+    clean = clean.replace("-----BEGIN EC PRIVATE KEY-----", "")
+    clean = clean.replace("-----END EC PRIVATE KEY-----", "")
+    
+    # 3. Remove ALL whitespace (newlines, spaces, tabs)
+    clean = "".join(clean.split())
+    clean = clean.replace("\\n", "")
+    
+    # 4. FIX PADDING (The solution to 'Incorrect padding')
     # Base64 strings must be a multiple of 4 in length.
     missing_padding = len(clean) % 4
     if missing_padding:
         clean += '=' * (4 - missing_padding)
     
+    # 5. Re-chunk (Standard PEM format is 64 chars wide)
     chunked = "\n".join(clean[i:i+64] for i in range(0, len(clean), 64))
     
+    # 6. Add headers back
     return f"-----BEGIN EC PRIVATE KEY-----\n{chunked}\n-----END EC PRIVATE KEY-----\n"
 
 # --- TOOL 1: MACRO CONTEXT ---
@@ -174,7 +180,7 @@ def initialize_agent(wallet_data_json: str = None):
     raw_private_key = os.getenv("CDP_API_KEY_PRIVATE_KEY")
     wallet_secret = os.getenv("CDP_WALLET_SECRET")
 
-    # Repair the key format
+    # Repair the key (Strip quotes, fix padding, fix headers)
     final_private_key = prepare_key(raw_private_key)
 
     if not api_key_name or not final_private_key:
@@ -182,6 +188,8 @@ def initialize_agent(wallet_data_json: str = None):
 
     # --- 2. INITIALIZE AGENTKIT ---
     try:
+        print("🔄 Initializing AgentKit...", flush=True)
+        # Pass cleaned keys to config
         wallet_config = CdpWalletProviderConfig(
             api_key_name=api_key_name,
             api_key_private_key=final_private_key,
@@ -194,7 +202,10 @@ def initialize_agent(wallet_data_json: str = None):
 
     except Exception as e:
         print(f"❌ FATAL AGENTKIT ERROR: {e}", flush=True)
-        # Check logs if this happens: likely still a key name mismatch
+        # Debug: Print first/last 10 chars of key (SAFE) to verify format
+        if final_private_key:
+             clean_debug = final_private_key.replace("\n", "\\n")
+             print(f"🔍 Key Debug: {clean_debug[:30]} ... {clean_debug[-30:]}", flush=True)
         raise e
 
     # 5. Get Tools & Setup Agent

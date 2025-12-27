@@ -144,77 +144,39 @@ def get_crypto_price(asset: str):
 # --- AGENT FACTORY (UPDATED FOR KEY FIX) ---
 def initialize_agent(wallet_data_json: str = None):
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
-    
-    # --- 1. UNPACK CREDENTIALS ---
-    encoded_json = os.getenv("CDP_B64_JSON")
-    if not encoded_json:
-        print("❌ CRITICAL: CDP_B64_JSON is missing!", flush=True)
-        return None, None
 
+    # --- 1. READ VARIABLES FROM RAILWAY ---
+    # We read the standard variable names
+    api_key_name = os.getenv("CDP_API_KEY_NAME")
+    private_key = os.getenv("CDP_API_KEY_PRIVATE_KEY")
+    wallet_secret = os.getenv("CDP_WALLET_SECRET")
+
+    # --- 2. SANITIZE PRIVATE KEY (The Railway Fix) ---
+    # Railway variables often treat newlines as literal characters ("\n").
+    # We must convert them back to real newlines for the crypto library.
+    if private_key:
+        if "\\n" in private_key:
+            private_key = private_key.replace("\\n", "\n")
+        
+        # Remove any accidental wrapping quotes users sometimes add
+        private_key = private_key.strip('"').strip("'")
+
+    if not api_key_name or not private_key:
+        print("❌ CRITICAL: CDP_API_KEY_NAME or CDP_API_KEY_PRIVATE_KEY is missing in Railway.", flush=True)
+
+    # --- 3. INITIALIZE SDK ---
     try:
-        print("📦 Unpacking Credentials...", flush=True)
-        decoded_bytes = base64.b64decode(encoded_json)
-        data = json.loads(decoded_bytes)
-        
-        # Get ID and Raw Key
-        key_id = data.get("name") or data.get("apiKeyName") or data.get("id")
-        raw_key = data.get("privateKey") or data.get("apiKeySecret") or data.get("secret")
-
-        if not key_id or not raw_key:
-            raise ValueError(f"JSON missing keys. Found: {list(data.keys())}")
-
-        # --- 2. KEY RECONSTRUCTION (The Fix) ---
-        # The logs showed your key is missing headers. We must add them.
-        
-        # A. Clean the raw string
-        clean_body = raw_key.replace("-----BEGIN EC PRIVATE KEY-----", "")
-        clean_body = clean_body.replace("-----END EC PRIVATE KEY-----", "")
-        clean_body = clean_body.replace("\\n", "").replace("\n", "").replace(" ", "").replace("\r", "")
-        clean_body = clean_body.strip()
-
-        # B. Fix Padding (Crypto library requirement)
-        missing_padding = len(clean_body) % 4
-        if missing_padding:
-            clean_body += '=' * (4 - missing_padding)
-
-        # C. Rebuild PEM with Headers (SDK requirement)
-        # Split into 64-character lines
-        chunked_body = "\n".join(clean_body[i:i+64] for i in range(0, len(clean_body), 64))
-        final_pem_key = f"-----BEGIN EC PRIVATE KEY-----\n{chunked_body}\n-----END EC PRIVATE KEY-----\n"
-        
-        print("✅ Key headers and padding reconstructed.", flush=True)
-        print(f"ℹ️ Key ID: {key_id}", flush=True)
-
-        # --- 3. INJECT INTO ENVIRONMENT (Crucial) ---
-        # We inject the FIXED key into the environment. 
-        # This acts as a safety net if the explicit config fails.
-        os.environ["CDP_API_KEY_ID"] = str(key_id)
-        os.environ["CDP_API_KEY_NAME"] = str(key_id)
-        os.environ["CDP_API_KEY_SECRET"] = final_pem_key
-        os.environ["CDP_API_KEY_PRIVATE_KEY"] = final_pem_key
-        
-        # Handle Secret
-        if not os.getenv("CDP_WALLET_SECRET"):
-            print("⚠️ WARNING: CDP_WALLET_SECRET missing. Setting default.", flush=True)
-            os.environ["CDP_WALLET_SECRET"] = "rafa_fallback_secret_123"
-
-    except Exception as e:
-        print(f"❌ CRITICAL: Failed to unpack keys: {e}", flush=True)
-        raise e
-
-    # --- 4. INITIALIZE SDK ---
-    try:
-        # We pass the RECONSTRUCTED key explicitly.
+        # We pass the cleaned keys directly to the config
         wallet_config = CdpWalletProviderConfig(
-            api_key_name=str(key_id),
-            api_key_private_key=final_pem_key,
+            api_key_name=api_key_name,
+            api_key_private_key=private_key,
             cdp_wallet_data=wallet_data_json if wallet_data_json else None
         )
-        
+
         wallet_provider = CdpWalletProvider(wallet_config)
         agent_kit = AgentKit(AgentKitConfig(wallet_provider=wallet_provider))
         print("✅ AgentKit Initialized Successfully!", flush=True)
-        
+
     except Exception as e:
         print(f"❌ FATAL SDK ERROR: {e}", flush=True)
         raise e

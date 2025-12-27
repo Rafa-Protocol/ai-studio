@@ -13,8 +13,8 @@ from langgraph.checkpoint.memory import MemorySaver
 from tavily import TavilyClient
 import motor.motor_asyncio
 import coinbase_agentkit
+from cdp import Cdp 
 
-# --- COMPATIBILITY LAYER (Fixes v0.7.4+ Crash) ---
 try:
     # 1. Try importing the NEW class name (v0.7+)
     from coinbase_agentkit import AgentKit, AgentKitConfig
@@ -45,6 +45,27 @@ db_client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URL)
 db = db_client.rafa_db
 tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
 
+# --- HELPER: KEY REPAIR ---
+def prepare_key(raw_key: str) -> str:
+    """
+    Rebuilds the PEM key perfectly to fix Railway flattening issues.
+    Strips it down to raw base64 and re-adds standard headers.
+    """
+    if not raw_key:
+        return None
+        
+    # 1. Strip headers and cleanup
+    clean = raw_key.replace("-----BEGIN EC PRIVATE KEY-----", "")
+    clean = clean.replace("-----END EC PRIVATE KEY-----", "")
+    clean = "".join(clean.split()) # Remove all whitespace/newlines/spaces
+    clean = clean.replace("\\n", "") # Remove literal newlines
+    
+    # 2. Re-chunk (Standard PEM format is 64 chars wide)
+    chunked = "\n".join(clean[i:i+64] for i in range(0, len(clean), 64))
+    
+    # 3. Add headers back
+    return f"-----BEGIN EC PRIVATE KEY-----\n{chunked}\n-----END EC PRIVATE KEY-----\n"
+
 # --- TOOL 1: MACRO CONTEXT ---
 @tool
 def check_market_conditions(dummy: str = ""):
@@ -59,7 +80,7 @@ def check_market_conditions(dummy: str = ""):
 @tool
 def analyze_token(ticker: str):
     """
-    Analyzes a token's technicals and fundamentals.
+    Analyzes a token's technicals and onchain data.
     """
     # Pass TICKER string to both functions
     tech = analyze_technicals(ticker) 
@@ -146,30 +167,34 @@ def initialize_agent(wallet_data_json: str = None):
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
 
     # --- 1. READ VARIABLES FROM RAILWAY ---
-    # We read the standard variable names
     api_key_name = os.getenv("CDP_API_KEY_NAME")
-    private_key = os.getenv("CDP_API_KEY_PRIVATE_KEY")
+    raw_private_key = os.getenv("CDP_API_KEY_PRIVATE_KEY")
     wallet_secret = os.getenv("CDP_WALLET_SECRET")
 
-    # --- 2. SANITIZE PRIVATE KEY (The Railway Fix) ---
-    # Railway variables often treat newlines as literal characters ("\n").
-    # We must convert them back to real newlines for the crypto library.
-    if private_key:
-        if "\\n" in private_key:
-            private_key = private_key.replace("\\n", "\n")
-        
-        # Remove any accidental wrapping quotes users sometimes add
-        private_key = private_key.strip('"').strip("'")
+    # --- 2. REPAIR KEY (The Railway Fix) ---
+    # We use the helper function to ensure standard PEM format
+    final_private_key = prepare_key(raw_private_key)
 
-    if not api_key_name or not private_key:
-        print("❌ CRITICAL: CDP_API_KEY_NAME or CDP_API_KEY_PRIVATE_KEY is missing in Railway.", flush=True)
+    if not api_key_name or not final_private_key:
+        print("❌ CRITICAL: CDP_API_KEY_NAME or CDP_API_KEY_PRIVATE_KEY is missing/invalid.", flush=True)
 
-    # --- 3. INITIALIZE SDK ---
+    # --- 3. CONFIGURE CDP SDK (Validation Step) ---
+    # This verifies authentication BEFORE AgentKit tries to load.
+    try:
+        print("Auth: Configuring CDP SDK...", flush=True)
+        Cdp.configure(api_key_name, final_private_key)
+        print("✅ CDP SDK Configured successfully.", flush=True)
+    except Exception as e:
+        print(f"❌ FATAL: CDP SDK refused the key: {e}", flush=True)
+        # If this fails, the key is wrong. No point continuing.
+        raise e
+
+    # --- 4. INITIALIZE AGENTKIT ---
     try:
         # We pass the cleaned keys directly to the config
         wallet_config = CdpWalletProviderConfig(
             api_key_name=api_key_name,
-            api_key_private_key=private_key,
+            api_key_private_key=final_private_key,
             cdp_wallet_data=wallet_data_json if wallet_data_json else None
         )
 
@@ -178,7 +203,7 @@ def initialize_agent(wallet_data_json: str = None):
         print("✅ AgentKit Initialized Successfully!", flush=True)
 
     except Exception as e:
-        print(f"❌ FATAL SDK ERROR: {e}", flush=True)
+        print(f"❌ FATAL AGENTKIT ERROR: {e}", flush=True)
         raise e
 
     # 5. Get Tools & Setup Agent
@@ -207,6 +232,8 @@ def initialize_agent(wallet_data_json: str = None):
     4. **EXECUTE:** If specific criteria are met, suggest the trade.
     5. USDC or EURC is considered "CASH" for trading purposes.
     6. Before you answer any user query, always look at current portfolio, token prices and market conditions.
+    7. When a user asks for coins or has empty wallet, get make 10 txs to faucet and get eth on base sepolia.
+
 
     **HOW TO TRADE:**
     1. **BUYING:** Calculate ETH amount needed.

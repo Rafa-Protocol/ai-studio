@@ -6,7 +6,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount, useSendTransaction, useBalance } from 'wagmi'; 
 import { parseEther, formatUnits } from 'viem';
-// 1. NEW IMPORTS FOR CHARTS
 import { LineChart, Line, PieChart, Pie, Cell, XAxis, Tooltip as RechartsTooltip, ResponsiveContainer, Legend } from 'recharts';
 import { 
   Wallet, Activity, TrendingUp, Clock, FileText, Hash, Zap, Shield, Disc, Wifi, Loader2 
@@ -14,7 +13,6 @@ import {
 import './App.css';
 
 // --- CONFIGURATION ---
-// CHANGE THIS WHEN DEPLOYING: "http://localhost:8000" -> "https://your-railway-url.app"
 const API_BASE_URL = process.env.REACT_APP_API_URL || "http://localhost:8000";
 
 // --- SUB-COMPONENT: TYPEWRITER EFFECT ---

@@ -144,45 +144,31 @@ def get_crypto_price(asset: str):
 def initialize_agent(wallet_data_json: str = None):
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
     
-    # 1. Load Variables
-    api_key_name = os.getenv("CDP_API_KEY_NAME") or os.getenv("CDP_API_KEY_ID")
-    raw_private_key = os.getenv("CDP_API_KEY_PRIVATE_KEY") or os.getenv("CDP_API_KEY_SECRET")
-
-    # --- 2. THE UNIVERSAL FIX ---
+    api_key_name = None
     api_key_private_key = None
-    if raw_private_key:
+    
+    # --- THE JSON FIX ---
+    # We read the raw JSON blob. Python's json library handles the newlines automatically.
+    creds_json = os.getenv("CDP_CREDS_JSON")
+    
+    if creds_json:
         try:
-            # Step A: Clean the raw input (remove quotes/spaces)
-            candidate_key = raw_private_key.strip().strip('"').strip("'")
+            print("🔑 DEBUG: Found CDP_CREDS_JSON. Parsing...", flush=True)
+            data = json.loads(creds_json)
+            api_key_name = data.get("name")
+            api_key_private_key = data.get("privateKey")
             
-            # Step B: Check if it is Base64 (doesn't start with dashes) and Decode it
-            if "-----BEGIN" not in candidate_key:
-                print("🔑 DEBUG: Detected Base64 input. Decoding...")
-                try:
-                    decoded_bytes = base64.b64decode(candidate_key)
-                    decoded_str = decoded_bytes.decode('utf-8')
-                    # If the result looks like a key, use it. Otherwise, assume raw was correct.
-                    if "-----BEGIN" in decoded_str:
-                        candidate_key = decoded_str
-                        print("🔑 DEBUG: Base64 decode successful.")
-                except Exception as e:
-                    print(f"⚠️ WARNING: Base64 decode failed ({e}), using raw string.")
-
-            # Step C: THE RECONSTRUCTION (This fixes the "ValueError")
-            # We strip EVERYTHING (headers, newlines, spaces, quotes) to get just the raw code.
-            payload = candidate_key.replace("-----BEGIN EC PRIVATE KEY-----", "")
-            payload = payload.replace("-----END EC PRIVATE KEY-----", "")
-            payload = payload.replace("\\n", "").replace("\n", "").replace(" ", "").replace("\r", "")
-            payload = payload.strip().strip('"').strip("'")
-
-            # Step D: Rebuild into strict 64-char lines (Required by OpenSSL)
-            chunked_body = "\n".join(payload[i:i+64] for i in range(0, len(payload), 64))
-            api_key_private_key = f"-----BEGIN EC PRIVATE KEY-----\n{chunked_body}\n-----END EC PRIVATE KEY-----\n"
-            
-            print("🔑 DEBUG: Key successfully reconstructed with strict formatting.")
-
+            # SANITY CHECK: Print the first 20 chars of the key in "raw" format
+            # This will show us if it's correct (Expect: '-----BEGIN...')
+            if api_key_private_key:
+                print(f"✅ DEBUG: Key loaded. Raw start: {repr(api_key_private_key[:20])}", flush=True)
+            else:
+                print("❌ CRITICAL: JSON parsed, but 'privateKey' field is missing/empty!", flush=True)
+                
         except Exception as e:
-            print(f"❌ CRITICAL: Key processing failed: {e}")
+            print(f"❌ CRITICAL: Failed to parse CDP_CREDS_JSON: {e}", flush=True)
+    else:
+        print("❌ CRITICAL: CDP_CREDS_JSON variable is missing from Railway!", flush=True)
    
     # 3. Configure Provider
     wallet_config = CdpWalletProviderConfig(

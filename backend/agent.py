@@ -45,34 +45,25 @@ tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
 # --- HELPER: KEY REPAIR ---
 def prepare_key(raw_key: str) -> str:
     """
-    Rebuilds the PEM key perfectly.
-    Fixes: Quotes, spaces, newlines, missing padding, bad formatting.
+    Standardizes the private key string to PEM format.
     """
     if not raw_key:
         return None
         
-    # 1. Clean formatting artifacts
-    # Strip quotes (User might have pasted "KEY" instead of KEY)
+    # Strip formatting artifacts
     clean = raw_key.strip().strip('"').strip("'")
-    
-    # 2. Strip existing headers to get the raw body
     clean = clean.replace("-----BEGIN EC PRIVATE KEY-----", "")
     clean = clean.replace("-----END EC PRIVATE KEY-----", "")
-    
-    # 3. Remove ALL whitespace (newlines, spaces, tabs)
-    clean = "".join(clean.split())
+    clean = "".join(clean.split()) 
     clean = clean.replace("\\n", "")
     
-    # 4. FIX PADDING (The solution to 'Incorrect padding')
-    # Base64 strings must be a multiple of 4 in length.
+    # Fix Padding
     missing_padding = len(clean) % 4
     if missing_padding:
         clean += '=' * (4 - missing_padding)
     
-    # 5. Re-chunk (Standard PEM format is 64 chars wide)
+    # Reconstruct PEM
     chunked = "\n".join(clean[i:i+64] for i in range(0, len(clean), 64))
-    
-    # 6. Add headers back
     return f"-----BEGIN EC PRIVATE KEY-----\n{chunked}\n-----END EC PRIVATE KEY-----\n"
 
 # --- TOOL 1: MACRO CONTEXT ---
@@ -175,21 +166,45 @@ def get_crypto_price(asset: str):
 def initialize_agent(wallet_data_json: str = None):
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
 
-    # --- 1. GET & REPAIR CREDENTIALS ---
+    # --- DIAGNOSTIC LOGGING ---
+    print("🔍 --- STARTING CREDENTIAL DIAGNOSTICS ---", flush=True)
+    
     api_key_name = os.getenv("CDP_API_KEY_NAME")
     raw_private_key = os.getenv("CDP_API_KEY_PRIVATE_KEY")
-    wallet_secret = os.getenv("CDP_WALLET_SECRET")
 
-    # Repair the key (Strip quotes, fix padding, fix headers)
+    # 1. Inspect API Key Name
+    print(f"🔍 API Name Found: {bool(api_key_name)}", flush=True)
+    if api_key_name:
+        print(f"    Value: {api_key_name}", flush=True)
+
+    # 2. Inspect Raw Private Key (Forensics)
+    print(f"🔍 Raw Key Found: {bool(raw_private_key)}", flush=True)
+    if raw_private_key:
+        print(f"    Length: {len(raw_private_key)}", flush=True)
+        # repr() reveals invisible characters like \n, \r, and spaces
+        print(f"    Raw Dump (First 50): {repr(raw_private_key[:50])}", flush=True)
+        print(f"    Raw Dump (Last 50):  {repr(raw_private_key[-50:])}", flush=True)
+
+    # 3. Attempt Repair
     final_private_key = prepare_key(raw_private_key)
+    
+    if final_private_key:
+        print(f"🔍 Repaired Key Structure:", flush=True)
+        # Check if it looks like valid PEM (3 distinct parts)
+        parts = final_private_key.split('\n')
+        print(f"    Header Line: {repr(parts[0])}", flush=True)
+        print(f"    Body Line 1: {repr(parts[1]) if len(parts) > 1 else 'MISSING'}", flush=True)
+        print(f"    Footer Line: {repr(parts[-2]) if len(parts) > 2 else 'MISSING'}", flush=True)
+    else:
+        print("❌ CRITICAL: Final key is Empty after repair.", flush=True)
+
+    print("🔍 --- END DIAGNOSTICS ---", flush=True)
 
     if not api_key_name or not final_private_key:
-        print("❌ CRITICAL: CDP_API_KEY_NAME or CDP_API_KEY_PRIVATE_KEY is missing/invalid.", flush=True)
+        raise ValueError("Credentials missing. Check logs above.")
 
-    # --- 2. INITIALIZE AGENTKIT ---
+    # --- INITIALIZE AGENTKIT ---
     try:
-        print("🔄 Initializing AgentKit...", flush=True)
-        # Pass cleaned keys to config
         wallet_config = CdpWalletProviderConfig(
             api_key_name=api_key_name,
             api_key_private_key=final_private_key,
@@ -201,11 +216,7 @@ def initialize_agent(wallet_data_json: str = None):
         print("✅ AgentKit Initialized Successfully!", flush=True)
 
     except Exception as e:
-        print(f"❌ FATAL AGENTKIT ERROR: {e}", flush=True)
-        # Debug: Print first/last 10 chars of key (SAFE) to verify format
-        if final_private_key:
-             clean_debug = final_private_key.replace("\n", "\\n")
-             print(f"🔍 Key Debug: {clean_debug[:30]} ... {clean_debug[-30:]}", flush=True)
+        print(f"❌ FATAL ERROR During Init: {e}", flush=True)
         raise e
 
     # 5. Get Tools & Setup Agent

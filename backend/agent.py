@@ -143,30 +143,44 @@ def initialize_agent(wallet_data_json: str = None):
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
 
     # --- 1. GET & SANITIZE CREDENTIALS ---
+    # We read the "Old" names you have in Railway
     api_key_name = os.getenv("CDP_API_KEY_NAME")
     raw_private_key = os.getenv("CDP_API_KEY_PRIVATE_KEY")
 
-    # The simple fix: just un-escape the newlines if they exist
+    # Sanitize the key (fix newlines)
     if raw_private_key:
         final_private_key = raw_private_key.replace('\\n', '\n')
     else:
         final_private_key = None
 
-    # --- 2. INITIALIZE AGENTKIT ---
+    # --- 2. FORCE-FEED THE NEW LIBRARY EXPECTATIONS ---    
+    if api_key_name:
+        os.environ["CDP_API_KEY_ID"] = api_key_name        # New Name Mapping
+    
+    if final_private_key:
+        os.environ["CDP_API_KEY_SECRET"] = final_private_key # New Name Mapping
+        # Also update the old one just in case other parts need it
+        os.environ["CDP_API_KEY_PRIVATE_KEY"] = final_private_key 
+
+    # --- 3. INITIALIZE AGENTKIT ---
     try:
-        # Use CdpWalletProviderConfig object instead of dict
+        # We pass the mapped values explicitly to the Config object
+        # Note: We use the *New* parameter names if available, or fall back to standard.
         wallet_config = CdpWalletProviderConfig(
             api_key_name=api_key_name,
-            api_key_private_key=final_private_key,
+            api_key_private_key=final_private_key, 
             cdp_wallet_data=wallet_data_json if wallet_data_json else None
         )
 
+        # Initialize
         wallet_provider = CdpWalletProvider(wallet_config)
         agent_kit = AgentKit(AgentKitConfig(wallet_provider=wallet_provider))
         print("✅ AgentKit Initialized Successfully!", flush=True)
 
     except Exception as e:
         print(f"❌ FATAL ERROR: {e}", flush=True)
+        # If the Config object fails, the library might be falling back to Env Vars.
+        # Since we force-set the Env Vars in step 2, this should catch the fallback.
         raise e
 
     # 3. Get Tools & Setup Agent

@@ -202,7 +202,8 @@ def initialize_agent(wallet_data_json: str = None):
     6. Before you answer any user query, always look at current portfolio, token prices and market conditions.
     7. **FUNDS:** If the user asks for "testnet funds", "eth", or "faucet":
        - **IGNORE MACRO CONDITIONS.** Free money is always good.
-       - Call the `request_faucet_funds` tool **ONCE**.
+       - Call the `request_faucet_funds` tool.
+       - You can ONLY use the faucet tool TEN times maximum per agent wallet.
        - Do NOT attempt to spam the faucet multiple times.
        - If the tool returns an error (like "rate limit"), stop and tell the user.
        - Only speak AFTER the tool successfully runs.

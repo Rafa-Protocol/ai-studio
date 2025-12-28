@@ -42,30 +42,6 @@ db_client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URL)
 db = db_client.rafa_db
 tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
 
-# --- HELPER: KEY REPAIR ---
-def prepare_key(raw_key: str) -> str:
-    """
-    Standardizes the private key string to PEM format.
-    """
-    if not raw_key:
-        return None
-        
-    # Strip formatting artifacts
-    clean = raw_key.strip().strip('"').strip("'")
-    clean = clean.replace("-----BEGIN EC PRIVATE KEY-----", "")
-    clean = clean.replace("-----END EC PRIVATE KEY-----", "")
-    clean = "".join(clean.split()) 
-    clean = clean.replace("\\n", "")
-    
-    # Fix Padding
-    missing_padding = len(clean) % 4
-    if missing_padding:
-        clean += '=' * (4 - missing_padding)
-    
-    # Reconstruct PEM
-    chunked = "\n".join(clean[i:i+64] for i in range(0, len(clean), 64))
-    return f"-----BEGIN EC PRIVATE KEY-----\n{chunked}\n-----END EC PRIVATE KEY-----\n"
-
 # --- TOOL 1: MACRO CONTEXT ---
 @tool
 def check_market_conditions(dummy: str = ""):
@@ -166,24 +142,19 @@ def get_crypto_price(asset: str):
 def initialize_agent(wallet_data_json: str = None):
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
 
-    # --- 1. GET CREDENTIALS ---
+    # --- 1. GET & SANITIZE CREDENTIALS ---
     api_key_name = os.getenv("CDP_API_KEY_NAME")
     raw_private_key = os.getenv("CDP_API_KEY_PRIVATE_KEY")
 
-    # --- 2. REPAIR & INJECT (The Double-Tap Fix) ---
-    final_private_key = prepare_key(raw_private_key)
-    
-    if api_key_name and final_private_key:
-        # CRITICAL: We overwrite the environment variables with the FIXED values.
-        # This stops the SDK from reading the broken Railway values.
-        os.environ["CDP_API_KEY_NAME"] = api_key_name
-        os.environ["CDP_API_KEY_PRIVATE_KEY"] = final_private_key
+    # The simple fix: just un-escape the newlines if they exist
+    if raw_private_key:
+        final_private_key = raw_private_key.replace('\\n', '\n')
     else:
-        print("❌ CRITICAL: Credentials missing. Check Railway variables.", flush=True)
+        final_private_key = None
 
-    # --- 3. INITIALIZE AGENTKIT ---
+    # --- 2. INITIALIZE AGENTKIT ---
     try:
-        # We pass the config explicitly, but now the Env Vars are also clean as a backup.
+        # Use CdpWalletProviderConfig object instead of dict
         wallet_config = CdpWalletProviderConfig(
             api_key_name=api_key_name,
             api_key_private_key=final_private_key,
@@ -198,7 +169,7 @@ def initialize_agent(wallet_data_json: str = None):
         print(f"❌ FATAL ERROR: {e}", flush=True)
         raise e
 
-    # 5. Get Tools & Setup Agent
+    # 3. Get Tools & Setup Agent
     agentkit_tools = get_langchain_tools(agent_kit)
     
     tools = agentkit_tools + [

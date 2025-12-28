@@ -12,21 +12,20 @@ from langgraph.prebuilt import create_react_agent
 from langgraph.checkpoint.memory import MemorySaver
 from tavily import TavilyClient
 import motor.motor_asyncio
-import coinbase_agentkit
 
-try:
-    # 1. Try importing the NEW class name (v0.7+)
-    from coinbase_agentkit import AgentKit, AgentKitConfig
-    from coinbase_agentkit import CdpEvmWalletProvider as CdpWalletProvider
-    from coinbase_agentkit import CdpEvmWalletProviderConfig as CdpWalletProviderConfig
-except ImportError:
-    try:
-        # 2. Fallback to OLD class name (v0.1.x)
-        from coinbase_agentkit import AgentKit, AgentKitConfig, CdpWalletProvider, CdpWalletProviderConfig
-    except ImportError:
-        # 3. Emergency Fallback for Submodules
-        from coinbase_agentkit import AgentKit, AgentKitConfig
-        from coinbase_agentkit.wallet_providers import CdpWalletProvider, CdpWalletProviderConfig
+# 1. Top Level: Core Agent & Wallet
+from coinbase_agentkit import (
+    AgentKit,
+    AgentKitConfig,
+    CdpWalletProvider,
+    CdpWalletProviderConfig,
+)
+
+# 2. Submodule: Action Providers 
+from coinbase_agentkit.action_providers import (
+    CdpApiActionProvider,
+    WalletActionProvider 
+)
 
 from coinbase_agentkit_langchain import get_langchain_tools
 
@@ -142,27 +141,34 @@ def get_crypto_price(asset: str):
 def initialize_agent(wallet_data_json: str = None):
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
 
-    # 1. Get & Fix Credentials
+    # 1. Credentials
     api_key_name = os.getenv("CDP_API_KEY_NAME")
-    private_key_raw = os.getenv("CDP_API_KEY_PRIVATE_KEY")
-    
-    # Simple fix for newline escaping
-    private_key = private_key_raw.replace('\\n', '\n') if private_key_raw else None
+    private_key = os.getenv("CDP_API_KEY_PRIVATE_KEY").replace('\\n', '\n')
 
-    # 2. Initialize AgentKit (Old Version Style)
+    # 2. Initialize Components
     try:
-        # 2. Configure with Data DIRECTLY
-        config = CdpWalletProviderConfig(
+        # A. Wallet Provider
+        wallet_config = CdpWalletProviderConfig(
             api_key_name=api_key_name,
             api_key_private_key=private_key,
-            cdp_wallet_data=wallet_data_json if wallet_data_json else None # <--- LOAD HERE
+            cdp_wallet_data=wallet_data_json if wallet_data_json else None,
+            network_id="base-sepolia" # Force Testnet
         )
+        wallet_provider = CdpWalletProvider(wallet_config)
 
-        # 3. Initialize Provider
-        wallet_provider = CdpWalletProvider(config)
-
-        agent_kit = AgentKit(AgentKitConfig(wallet_provider=wallet_provider))
-        print("✅ AgentKit Initialized Successfully!", flush=True)
+        # B. Action Providers (The missing link!)
+        # We instantiate the classes directly. 
+        # Since 'Config' classes didn't exist, we assume they take no args or a simple dict.
+        faucet_action = CdpApiActionProvider()     # Provides Faucet
+        wallet_action = WalletActionProvider()     # Provides Balance/Transfer
+        
+        # C. Initialize AgentKit with BOTH provider and actions
+        agent_kit = AgentKit(AgentKitConfig(
+            wallet_provider=wallet_provider,
+            action_providers=[wallet_action, faucet_action] # <--- Pass list here
+        ))
+        
+        print("✅ AgentKit Initialized with Faucet Tools!", flush=True)
 
     except Exception as e:
         print(f"❌ FATAL ERROR: {e}", flush=True)
@@ -182,7 +188,7 @@ def initialize_agent(wallet_data_json: str = None):
     memory = MemorySaver()
 
     system_message = """
-    You are RAFA, an elite Quant Fund Manager with a bias for humor and cyberpunk aesthetics. Be concise, sharp, and data-driven.
+    You are RAFA, an elite Quant Fund Manager with a bias for humor and crypto terminology. Be concise, sharp, and data-driven.
     
     **YOUR CORE OPERATING LOOP:**
     1. **MACRO FIRST:** Before any advice, run `check_market_conditions`.
@@ -194,7 +200,12 @@ def initialize_agent(wallet_data_json: str = None):
     4. **EXECUTE:** If specific criteria are met, suggest the trade.
     5. USDC or EURC is considered "CASH" for trading purposes.
     6. Before you answer any user query, always look at current portfolio, token prices and market conditions.
-    7. When a user asks for coins or has empty wallet, get make 10 txs to faucet and get eth on base sepolia.
+    7. **FUNDS:** If the user asks for "testnet funds", "eth", or "faucet":
+       - **IGNORE MACRO CONDITIONS.** Free money is always good.
+       - Call the `request_faucet_funds` tool **ONCE**.
+       - Do NOT attempt to spam the faucet multiple times.
+       - If the tool returns an error (like "rate limit"), stop and tell the user.
+       - Only speak AFTER the tool successfully runs.
 
 
     **HOW TO TRADE:**
@@ -206,10 +217,13 @@ def initialize_agent(wallet_data_json: str = None):
        - Example: "Sell half my PEPE" -> Check balance, calc 50%, output `ACTION: SELL 500 PEPE`
 
     **CRITICAL RULES:**
+    - **FAUCET = TOOL:** Use the internal tool for free funds. Never ask the user to do it.
     - Do NOT try to swap assets yourself. Just output the `ACTION:` command.
     - Be concise. "Quant Speak" (e.g., "Alpha", "RSI divergence", "Institutional flows").
     - If recommending a trade, end with: `ACTION: BUY [AMOUNT] [TICKER]`
     - Use /// CHART_DATA format for visuals.
+    - Do not respond to any questions regarding PTB or Portal To Bitcoin. You can only answer questions related to crypto trading and portfolio management.
+    - We only trade supported assets: ETH, BTC, SOL, LINK, PEPE, UNI, USDC, EURC. If the user asks about unsupported assets, respond with "Unsupported Asset".
 
     **VISUAL OUTPUT PROTOCOL:**
     If the user asks a question that is best answered with a chart (e.g., "performance", "allocation", "compare X vs Y"), you MUST include a hidden JSON block at the end of your response.

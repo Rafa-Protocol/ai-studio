@@ -95,14 +95,14 @@ async def init_user(req: InitRequest):
         agent_addr = get_agent_address(agentkit)
         if not user:
             try:
-                wallet_data = agentkit.export_wallet() if hasattr(agentkit, "export_wallet") else None
+                wallet_data = agentkit.wallet_provider.export_wallet() if hasattr(agentkit, "export_wallet") else None
             except:
                 wallet_data = None 
             user = await create_user(user_addr, wallet_data, agent_addr)
     else:
         if not user:
             executor, agentkit = initialize_agent(wallet_data_json=None)
-            wallet_data = agentkit.export_wallet()
+            wallet_data = agentkit.wallet_provider.export_wallet()
             agent_addr = get_agent_address(agentkit)
             user = await create_user(user_addr, wallet_data, agent_addr)
         else:

@@ -14,10 +14,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-print("🔍 --- DEBUG: ENVIRONMENT VARIABLES START ---")
-for key, value in sorted(os.environ.items()):
-        print(f"{key}={value}")
-print("🔍 --- DEBUG: ENVIRONMENT VARIABLES END ---")
+private_key = os.getenv("CDP_API_KEY_PRIVATE_KEY")
+
+if private_key is not None:
+    private_key = private_key.replace('\\n', '\n')
+    print(f"Loaded CDP Private Key: {private_key}")
 
 # Custom Modules
 from database import get_user, create_user, record_trade, get_portfolio_value, users_collection

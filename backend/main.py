@@ -14,6 +14,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+print("🔍 --- DEBUG: ENVIRONMENT VARIABLES START ---")
+for key, value in sorted(os.environ.items()):
+        print(f"{key}={value}")
+print("🔍 --- DEBUG: ENVIRONMENT VARIABLES END ---")
+
 # Custom Modules
 from database import get_user, create_user, record_trade, get_portfolio_value, users_collection
 from agent import initialize_agent, get_agent_address

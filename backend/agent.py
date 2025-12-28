@@ -166,45 +166,24 @@ def get_crypto_price(asset: str):
 def initialize_agent(wallet_data_json: str = None):
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
 
-    # --- DIAGNOSTIC LOGGING ---
-    print("🔍 --- STARTING CREDENTIAL DIAGNOSTICS ---", flush=True)
-    
+    # --- 1. GET CREDENTIALS ---
     api_key_name = os.getenv("CDP_API_KEY_NAME")
     raw_private_key = os.getenv("CDP_API_KEY_PRIVATE_KEY")
 
-    # 1. Inspect API Key Name
-    print(f"🔍 API Name Found: {bool(api_key_name)}", flush=True)
-    if api_key_name:
-        print(f"    Value: {api_key_name}", flush=True)
-
-    # 2. Inspect Raw Private Key (Forensics)
-    print(f"🔍 Raw Key Found: {bool(raw_private_key)}", flush=True)
-    if raw_private_key:
-        print(f"    Length: {len(raw_private_key)}", flush=True)
-        # repr() reveals invisible characters like \n, \r, and spaces
-        print(f"    Raw Dump (First 50): {repr(raw_private_key[:50])}", flush=True)
-        print(f"    Raw Dump (Last 50):  {repr(raw_private_key[-50:])}", flush=True)
-
-    # 3. Attempt Repair
+    # --- 2. REPAIR & INJECT (The Double-Tap Fix) ---
     final_private_key = prepare_key(raw_private_key)
     
-    if final_private_key:
-        print(f"🔍 Repaired Key Structure:", flush=True)
-        # Check if it looks like valid PEM (3 distinct parts)
-        parts = final_private_key.split('\n')
-        print(f"    Header Line: {repr(parts[0])}", flush=True)
-        print(f"    Body Line 1: {repr(parts[1]) if len(parts) > 1 else 'MISSING'}", flush=True)
-        print(f"    Footer Line: {repr(parts[-2]) if len(parts) > 2 else 'MISSING'}", flush=True)
+    if api_key_name and final_private_key:
+        # CRITICAL: We overwrite the environment variables with the FIXED values.
+        # This stops the SDK from reading the broken Railway values.
+        os.environ["CDP_API_KEY_NAME"] = api_key_name
+        os.environ["CDP_API_KEY_PRIVATE_KEY"] = final_private_key
     else:
-        print("❌ CRITICAL: Final key is Empty after repair.", flush=True)
+        print("❌ CRITICAL: Credentials missing. Check Railway variables.", flush=True)
 
-    print("🔍 --- END DIAGNOSTICS ---", flush=True)
-
-    if not api_key_name or not final_private_key:
-        raise ValueError("Credentials missing. Check logs above.")
-
-    # --- INITIALIZE AGENTKIT ---
+    # --- 3. INITIALIZE AGENTKIT ---
     try:
+        # We pass the config explicitly, but now the Env Vars are also clean as a backup.
         wallet_config = CdpWalletProviderConfig(
             api_key_name=api_key_name,
             api_key_private_key=final_private_key,
@@ -216,7 +195,7 @@ def initialize_agent(wallet_data_json: str = None):
         print("✅ AgentKit Initialized Successfully!", flush=True)
 
     except Exception as e:
-        print(f"❌ FATAL ERROR During Init: {e}", flush=True)
+        print(f"❌ FATAL ERROR: {e}", flush=True)
         raise e
 
     # 5. Get Tools & Setup Agent

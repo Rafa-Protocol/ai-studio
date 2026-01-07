@@ -203,6 +203,45 @@ const PortfolioTable = ({ portfolio, prices }) => {
   );
 };
 
+const AgentThinking = () => {
+  const [step, setStep] = useState(0);
+  const thoughts = [
+    "📡 ESTABLISHING SECURE UPLINK...",
+    "🧠 LOADING QUANT MODELS...",
+    "🔍 ANALYZING ON-CHAIN DATA...",
+    "🛡️ VERIFYING CONTRACT PERMISSIONS...",
+    "⚡ SIMULATING TRANSACTION PATH...",
+    "🖊️ SIGNING PAYLOAD VIA CDP...",
+    "🚀 BROADCASTING TO NETWORK..."
+  ];
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setStep((prev) => (prev + 1) % thoughts.length);
+    }, 1200); // Change text every 1.2s
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="flex items-center gap-4 mt-4 mb-4 ml-6 animate-in fade-in slide-in-from-left-2 duration-500">
+      {/* Custom Cyberpunk Spinner */}
+      <div className="relative w-6 h-6">
+        <div className="absolute inset-0 border-2 border-t-cyan-500 border-r-transparent border-b-cyan-800 border-l-transparent rounded-full animate-spin"></div>
+        <div className="absolute inset-1 border-2 border-t-transparent border-r-green-400 border-b-transparent border-l-green-400 rounded-full animate-spin-reverse"></div>
+      </div>
+      
+      <div className="flex flex-col">
+        <span className="text-[10px] text-green-500 font-mono tracking-widest">
+           {thoughts[step]}<span className="animate-pulse">_</span>
+        </span>
+        <span className="text-[8px] text-gray-600 uppercase tracking-wide">
+           RUNTIME_EXECUTION_ACTIVE
+        </span>
+      </div>
+    </div>
+  );
+};
+
 // --- MAIN APP COMPONENT ---
 function App() {
   const { address, isConnected } = useAccount();
@@ -274,7 +313,6 @@ function App() {
 
         if (!agentAddress) {
             addLine('system', `>> USER IDENTITY CONFIRMED: ${address.slice(0,6)}...`);
-            addLine('info', ">> Bootstrapping Agent... (Requesting Airdrop if new)");
         }
 
         // FIXED: Added /api/ prefix
@@ -518,7 +556,7 @@ function App() {
                         <div className="mt-4 mb-2 text-white font-bold flex items-start gap-3 fade-in">
                              <div className="mt-1 text-green-500">➜</div>
                              <div className="bg-[#111] px-3 py-2 rounded-r-xl rounded-bl-xl border-l-2 border-green-500">
-                                <span className="text-green-500 mr-2 text-xs opacity-50 select-none block mb-1">root@rafa:~$</span>
+                                <span className="text-green-500 mr-2 text-xs opacity-50 select-none block mb-1">investor@rafa:~$</span>
                                 {line.text}
                              </div>
                         </div>
@@ -543,12 +581,7 @@ function App() {
                 </div>
              ))}
              
-             {isCmdLoading && (
-                 <div className="text-cyan-500 animate-pulse text-xs ml-6 flex items-center gap-2 mt-4">
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span className="tracking-widest">EXECUTING_SMART_CONTRACT...</span>
-                 </div>
-             )}
+             {isCmdLoading && <AgentThinking />}
              <div ref={bottomRef} />
         </div>
 

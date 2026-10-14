@@ -33,6 +33,14 @@ async def create_user(wallet_address: str, wallet_data: str, agent_address: str)
 
 # --- TRADING & PORTFOLIO ---
 
+# SECURITY/HYGIENE FIX: Global ETH price source. Sourced from environment
+# variable at module load. This must be set in production; a value of 0
+# indicates an unconfigured price and will trigger warnings in record_trade.
+ETH_PRICE_FALLBACK = float(os.getenv("ETH_PRICE_USD", "0") or "0")
+
+
+# --- TRADING & PORTFOLIO ---
+
 async def record_trade(user_addr: str, asset: str, amount: float, price_at_trade: float, side: str, tx_hash: str):
     """
     Records trade and updates 'Invested ETH' to simulate spending.
@@ -41,25 +49,19 @@ async def record_trade(user_addr: str, asset: str, amount: float, price_at_trade
     asset = asset.upper()
     
     # 1. Calculate the ETH Cost
-    # We use a rough heuristic: USD_Value / 3000 (Approx ETH Price)
-    # Ideally, pass the real ETH price here, but this is safe for simulation.
+    # Use configurable ETH price (from environment), not hard-coded approximation.
     total_usd_value = amount * price_at_trade
-    # If price < 1000, assume it is NOT ETH.
-    # We need to know current ETH price to be precise, but let's estimate or fetch if possible.
-    # For this fix, let's just assume price_at_trade is USD.
     
-    # We will simply track the USD value spent, then convert to ETH in main.py? 
-    # No, let's track ETH.
-    # For now, let's assume ETH = $3000 for the calculation OR utilize the passed price if it was ETH.
+    # Resolve ETH price at runtime (allows direct env var or external override)
+    global ETH_PRICE_FALLBACK
+    if ETH_PRICE_FALLBACK <= 0:
+        ETH_PRICE_FALLBACK = float(os.getenv("ETH_PRICE_USD", "0") or "0")
     
-    # BETTER: We just assume the caller passes valid data.
-    # Let's say: cost_in_eth = (amount * price) / ETH_PRICE 
-    # Since we don't have ETH price here easily without passing it, 
-    # let's modify record_trade to accept 'eth_cost' if possible.
-    
-    # For now, simplistic approximation to unblock you:
-    approx_eth_price = 3300.0 
-    cost_in_eth = total_usd_value / approx_eth_price
+    if ETH_PRICE_FALLBACK <= 0:
+        print("!! PRICE WARNING: ETH price not configured (ETH_PRICE_USD).")
+        cost_in_eth = 0.0
+    else:
+        cost_in_eth = total_usd_value / ETH_PRICE_FALLBACK
     
     if side.upper() == "BUY":
         # Spending ETH

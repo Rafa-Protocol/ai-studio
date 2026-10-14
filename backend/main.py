@@ -26,27 +26,31 @@ RPC_URL = "https://sepolia.base.org"
 web3 = Web3(Web3.HTTPProvider(RPC_URL))
 
 # --- 2. SETUP GLOBAL AGENT WALLET ---
-PRIVATE_KEY = os.getenv("PRIVATE_KEY", "YOUR_PRIVATE_KEY_HERE") 
-try:
-    if "YOUR_PRIVATE_KEY" in PRIVATE_KEY or len(PRIVATE_KEY) < 60:
-        # Don't crash on local if key is missing, just warn
-        print("WARNING: 'PRIVATE_KEY' not set. Real swaps will fail.")
-        agent_account = None
-    else:
-        agent_account = Account.from_key(PRIVATE_KEY)
-        print(f"INFO: Global Agent Address: {agent_account.address}")
-except Exception as e:
-    print(f"WARNING: Could not load Global Agent Wallet ({e}).")
+# SECURITY FIX: Removed hardcoded fallback default key. The environment variable
+# is mandatory in production. A placeholder key present in source control or
+# deployed with a default fallback poses a catastrophic key-compromise risk.
+# Operators MUST set PRIVATE_KEY explicitly in the production environment.
+PRIVATE_KEY_ENV = os.getenv("PRIVATE_KEY", "")
+if "YOUR_PRIVATE_KEY" in PRIVATE_KEY_ENV or len(PRIVATE_KEY_ENV) < 60:
+    # Don't crash on local if key is missing, just warn
+    print("WARNING: 'PRIVATE_KEY' not set or invalid. Real swaps will fail.")
     agent_account = None
+else:
+    try:
+        agent_account = Account.from_key(PRIVATE_KEY_ENV)
+        print(f"INFO: Global Agent Address: {agent_account.address}")
+    except Exception as e:
+        print(f"WARNING: Could not load Global Agent Wallet ({e}).")
+        agent_account = None
 
 app = FastAPI(title="AI Studio", description="Playground for AI Agents on Blockchain", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=os.getenv("ALLOWED_ORIGINS", "https://ai-studio.rafa.fund").split(","),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-User-Address"],
 )
 
 AGENT_CACHE = {}
@@ -78,7 +82,7 @@ def update_price_cache():
 
 @app.on_event("startup")
 async def startup_event():
-    update_price_cache()
+    await update_price_cache()
 
 # --- API ENDPOINTS ---
 

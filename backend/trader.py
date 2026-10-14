@@ -1,6 +1,16 @@
+import os
 import time
 from web3 import Web3
 from dex_config import TRADE_REGISTRY_ADDRESS, REGISTRY_ABI, TOKEN_MAP
+
+# --- CONFIGURATION (FROM ENVIRONMENT, NOT HARD-CODED) ---
+# These values SHOULD be overridden in production via environment variables.
+# Hard-coded fallbacks are provided ONLY as local development defaults and
+# MUST NOT be used on mainnet or testnet without explicit review.
+GAS_LIMIT_DEFAULT = int(os.getenv("TRADE_GAS_LIMIT", "500000"))
+MAX_FEE_PER_GAS_GWEI = int(os.getenv("MAX_FEE_PER_GAS_GWEI", "3"))
+MAX_PRIORITY_FEE_PER_GWEI = int(os.getenv("MAX_PRIORITY_FEE_PER_GWEI", "1.5"))
+CHAIN_ID = int(os.getenv("CHAIN_ID", "84532"))  # Base Sepolia
 
 def execute_swap(web3: Web3, agent_account, ticker: str, amount: float, user_address: str, price: float, side: str = "BUY"):
     """
@@ -27,20 +37,21 @@ def execute_swap(web3: Web3, agent_account, ticker: str, amount: float, user_add
     print(f">> RECORDING ON-CHAIN: {user_sum} {ticker} {amount} @ ${price}")
 
     # 4. Build Transaction
-    # FIX: Increased Gas Limit to 500,000 to prevent 'Out of Gas' errors
+    # Configuration values are sourced from environment variables with
+    # safe local development defaults. Review before production use.
     tx = contract.functions.recordTrade(
-        user_sum,       
-        ticker,         
-        amount_wei,     
-        price_wei,      
-        side          
+        user_sum,
+        ticker,
+        amount_wei,
+        price_wei,
+        side
     ).build_transaction({
         'from': agent_account.address,
         'nonce': web3.eth.get_transaction_count(agent_account.address),
-        'gas': 500000,  
-        'maxFeePerGas': web3.to_wei('3', 'gwei'),     
-        'maxPriorityFeePerGas': web3.to_wei('1.5', 'gwei'),
-        'chainId': 84532 
+        'gas': GAS_LIMIT_DEFAULT,
+        'maxFeePerGas': web3.to_wei(str(MAX_FEE_PER_GAS_GWEI), 'gwei'),
+        'maxPriorityFeePerGas': web3.to_wei(str(MAX_PRIORITY_FEE_PER_GWEI), 'gwei'),
+        'chainId': CHAIN_ID
     })
 
     # 5. Sign & Send

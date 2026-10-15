@@ -43,13 +43,19 @@ def get_token_data(ticker):
     url = f"https://public-api.birdeye.so/defi/token_overview?address={address}"
     
     try:
-        res = requests.get(url, headers=headers).json()
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.status_code != 200:
+            print(f"⚠️ FUNDAMENTAL HTTP ERROR ({ticker}): {resp.status_code}")
+            return None
+        res = resp.json()
         
-        if not res.get('success'):
+        if not isinstance(res, dict) or not res.get('success'):
             print(f"⚠️ FUNDAMENTAL ERROR ({ticker}): {res}") 
             return None
         
-        data = res['data']
+        data = res.get('data')
+        if not isinstance(data, dict):
+            return None
         
         # 2. Store in Cache
         fundamental_cache[ticker_upper] = data
@@ -109,17 +115,21 @@ def analyze_technicals(ticker):
     # but we can grab the 'close' of the latest candle.
     current_price = None
     try:
-        candle = requests.get(
+        resp = requests.get(
             "https://api.taapi.io/candle", 
             params={
                 'secret': TAAPI_API_KEY, 
                 'exchange': 'binance', 
                 'symbol': f"{ticker_upper}/USDT", 
                 'interval': '1h'
-            }
-        ).json()
-        current_price = candle.get('close')
-    except:
+            },
+            timeout=5
+        )
+        if resp.status_code == 200:
+            candle = resp.json()
+            if isinstance(candle, dict):
+                current_price = candle.get('close')
+    except Exception:
         pass
 
     # 3. VALIDATE DATA

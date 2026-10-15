@@ -52,7 +52,9 @@ app.add_middleware(
 AGENT_CACHE = {}
 
 PRICE_CACHE = {
-    "eth": 0, "btc": 0, "sol": 0, "usdc": 1.0, "last_updated": 0
+    "eth": 0.0, "btc": 0.0, "sol": 0.0, "usdc": 1.0,
+    "link": 0.0, "uni": 0.0, "comp": 0.0, "aave": 0.0, "pepe": 0.0,
+    "last_updated": 0.0
 }
 
 def update_price_cache():
@@ -61,19 +63,22 @@ def update_price_cache():
     try:
         ids = "ethereum,bitcoin,solana,chainlink,uniswap,compound-governance-token,aave,pepe"
         url = f"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd"
-        data = requests.get(url, timeout=5).json()
-        
-        PRICE_CACHE["eth"] = data.get("ethereum", {}).get("usd", 0)
-        PRICE_CACHE["btc"] = data.get("bitcoin", {}).get("usd", 0)
-        PRICE_CACHE["sol"] = data.get("solana", {}).get("usd", 0)
-        PRICE_CACHE["link"] = data.get("chainlink", {}).get("usd", 0)
-        PRICE_CACHE["uni"] = data.get("uniswap", {}).get("usd", 0)
-        PRICE_CACHE["comp"] = data.get("compound-governance-token", {}).get("usd", 0)
-        PRICE_CACHE["aave"] = data.get("aave", {}).get("usd", 0)
-        PRICE_CACHE["pepe"] = data.get("pepe", {}).get("usd", 0)
-        
+        resp = requests.get(url, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, dict):
+                mapping = {
+                    "eth": "ethereum", "btc": "bitcoin", "sol": "solana",
+                    "link": "chainlink", "uni": "uniswap",
+                    "comp": "compound-governance-token", "aave": "aave",
+                    "pepe": "pepe"
+                }
+                for cache_key, cg_id in mapping.items():
+                    if cg_id in data and isinstance(data[cg_id], dict) and "usd" in data[cg_id]:
+                        PRICE_CACHE[cache_key] = float(data[cg_id]["usd"])
         PRICE_CACHE["last_updated"] = time.time()
     except Exception as e:
+        PRICE_CACHE["last_updated"] = time.time()
         print(f"!! Price fetch failed: {e}")
 
 @app.on_event("startup")
@@ -213,7 +218,7 @@ async def run_strategy(request: StrategyRequest):
 
         context_injection = (
             f"\n\n[SYSTEM DATA INJECTION]"
-            f"\n- Live Prices: ETH=${PRICE_CACHE['eth']}, UNI=${PRICE_CACHE['uni']}, LINK=${PRICE_CACHE['link']}, SOL=${PRICE_CACHE['sol']}, PEPE=${PRICE_CACHE['pepe']}"
+            f"\n- Live Prices: ETH=${PRICE_CACHE.get('eth', 0)}, UNI=${PRICE_CACHE.get('uni', 0)}, LINK=${PRICE_CACHE.get('link', 0)}, SOL=${PRICE_CACHE.get('sol', 0)}, PEPE=${PRICE_CACHE.get('pepe', 0)}"
             f"\n- User Portfolio: {portfolio_str}" 
             f"\n[END DATA]"
         )

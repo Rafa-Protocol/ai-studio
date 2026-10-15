@@ -39,7 +39,8 @@ load_dotenv()
 MONGO_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
 db_client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URL)
 db = db_client.rafa_db
-tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
+tavily_api_key = os.getenv("TAVILY_API_KEY")
+tavily_client = TavilyClient(api_key=tavily_api_key) if tavily_api_key else None
 
 # --- TOOL 1: MACRO CONTEXT ---
 @tool
@@ -76,6 +77,8 @@ def get_news_sentiment(query: str):
     """
     Performs a Multi-Angle News Search to get specific headlines, not just homepages.
     """
+    if not tavily_client:
+        return "News intelligence unavailable: TAVILY_API_KEY not configured."
     try:
         # We run 3 specific searches to ensure we get depth, not just a homepage
         queries = [
